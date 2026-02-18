@@ -8,12 +8,15 @@ function createClient(url, key) {
   const from = (table) => ({
     _table: table, _filters: [], _order: null, _sel: "*",
     select(s) { this._sel = s; return this; },
-    order(col, opts) { this._order = col + (opts?.ascending===false?"?order="+col+".desc":"?order="+col+".asc"); return this; },
+    order(col, opts) {
+      this._order = "order=" + col + (opts?.ascending === false ? ".desc" : ".asc");
+      return this;
+    },
     eq(col, val) { this._filters.push(col + "=eq." + val); return this; },
-    async _url(extra) {
+    async _url() {
       let u = rest + "/" + this._table + "?select=" + this._sel;
-      this._filters.forEach(f => u += "&" + f);
-      if (this._order) u = rest + "/" + this._table + "?" + this._order + "&select=" + this._sel + (this._filters.length?"&"+this._filters.join("&"):"");
+      if (this._filters.length) u += "&" + this._filters.join("&");
+      if (this._order) u += "&" + this._order;
       return u;
     },
     async select_run() {
@@ -121,7 +124,7 @@ function useSupabaseData() {
     try {
       const q = (table, order) => {
         let t = sb.from(table);
-        if (order) t = t.order(order, { ascending: false });
+        if (order) t._order = order + ".desc";
         return t.select_run();
       };
       const [r1,r2,r3,r4,r5] = await Promise.all([q("chantiers","created_at"),q("depenses","date"),q("interventions","created_at"),q("intervention_depenses"),q("intervention_todos")]);
