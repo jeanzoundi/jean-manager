@@ -1,6 +1,5 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import * as XLSX from "xlsx";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 
 // ── Supabase ──────────────────────────────────────────────────────────────────
 const SUPA_URL = "https://mbkwpaxissvvjhewkggl.supabase.co";
@@ -9,405 +8,381 @@ const HDR = { "Content-Type":"application/json","apikey":SUPA_KEY,"Authorization
 const REST = SUPA_URL+"/rest/v1";
 
 function sbFrom(t){
-  return{
-    _t:t,_f:[],_o:null,_s:"*",
-    select(s){this._s=s;return this;},
-    order(c,o){this._o="order="+c+(o?.ascending===false?".desc":".asc");return this;},
-    eq(c,v){this._f.push(c+"=eq."+v);return this;},
-    _url(){let u=REST+"/"+this._t+"?select="+this._s;if(this._f.length)u+="&"+this._f.join("&");if(this._o)u+="&"+this._o;return u;},
-    async get(){const r=await fetch(this._url(),{headers:HDR});const d=await r.json();return r.ok?{data:d,error:null}:{data:null,error:d};},
-    async insert(obj){const r=await fetch(REST+"/"+this._t,{method:"POST",headers:{...HDR,"Prefer":"return=representation"},body:JSON.stringify(obj)});const d=await r.json();return r.ok?{data:d,error:null}:{data:null,error:d};},
-    async update(obj){const u=REST+"/"+this._t+(this._f.length?"?"+this._f.join("&"):"");const r=await fetch(u,{method:"PATCH",headers:{...HDR,"Prefer":"return=representation"},body:JSON.stringify(obj)});const d=await r.json();return r.ok?{data:d,error:null}:{data:null,error:d};},
-    async del(){const u=REST+"/"+this._t+(this._f.length?"?"+this._f.join("&"):"");const r=await fetch(u,{method:"DELETE",headers:HDR});return r.ok?{error:null}:{error:await r.json()};}
+  var _t=t, _f=[], _o=null, _s="*";
+  function url(){ var u=REST+"/"+_t+"?select="+_s; if(_f.length) u+="&"+_f.join("&"); if(_o) u+="&"+_o; return u; }
+  var api={
+    select: function(s){ _s=s; return api; },
+    order:  function(c,o){ _o="order="+c+(o&&o.ascending===false?".desc":".asc"); return api; },
+    eq:     function(c,v){ _f.push(c+"=eq."+v); return api; },
+    get:    function(){ return fetch(url(),{headers:HDR}).then(function(r){ return r.json().then(function(d){ return r.ok?{data:d,error:null}:{data:null,error:d}; }); }); },
+    insert: function(p){ return fetch(REST+"/"+_t,{method:"POST",headers:Object.assign({},HDR,{"Prefer":"return=representation"}),body:JSON.stringify(p)}).then(function(r){ return r.json().then(function(d){ return r.ok?{data:d,error:null}:{data:null,error:d}; }); }); },
+    update: function(p){ var u=REST+"/"+_t+(_f.length?"?"+_f.join("&"):""); return fetch(u,{method:"PATCH",headers:Object.assign({},HDR,{"Prefer":"return=representation"}),body:JSON.stringify(p)}).then(function(r){ return r.json().then(function(d){ return r.ok?{data:d,error:null}:{data:null,error:d}; }); }); },
+    del:    function(){ var u=REST+"/"+_t+(_f.length?"?"+_f.join("&"):""); return fetch(u,{method:"DELETE",headers:HDR}).then(function(r){ return r.ok?{error:null}:r.json().then(function(d){ return {error:d}; }); }); }
   };
+  return api;
 }
-const sb={from:sbFrom};
+var sb = { from: sbFrom };
 
-// ── Responsive hook ───────────────────────────────────────────────────────────
-function useBP(){
-  const [bp,setBp]=useState(()=>{const w=window.innerWidth;return w<480?"xs":w<768?"sm":w<1024?"md":"lg";});
-  useEffect(()=>{const fn=()=>{const w=window.innerWidth;setBp(w<480?"xs":w<768?"sm":w<1024?"md":"lg");};window.addEventListener("resize",fn);return()=>window.removeEventListener("resize",fn);},[]);
-  return{bp,isMobile:bp==="xs"||bp==="sm"};
-}
-
-// ── Constantes ────────────────────────────────────────────────────────────────
-const C={
-  orange:"#F97316",dark:"#292524",mid:"#44403C",border:"#57534E",card:"#292524",
-  bg:"#1C1917",white:"#FAFAF9",muted:"#A8A29E",light:"#78716C",
-  green:"#22C55E",red:"#EF4444",yellow:"#EAB308",blue:"#3B82F6",purple:"#A855F7"
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const DEFAULT_THEME = {
+  primary:"#F97316", secondary:"#3B82F6", success:"#22C55E", danger:"#EF4444", warning:"#EAB308",
+  bg:"#1C1917", card:"#292524", mid:"#44403C", border:"#57534E", white:"#FAFAF9", muted:"#A8A29E",
+  sidebarWidth:210, borderRadius:12, fontFamily:"'Segoe UI',system-ui,sans-serif",
+  companyName:"JEAN BTP SARL", companyAddress:"Zone Industrielle, Abidjan",
+  companyTel:"+225 27 00 00 00", companyEmail:"devis@jeanbtp.ci", companySiret:"CI-ABJ-2024-B-12345",
 };
-const CATS=["Main d'œuvre","Matériaux","Équipement","Transport","Sous-traitance","Divers"];
-const UNITES=["U","m²","ml","m³","kg","t","forfait","h","j"];
-const STATUT_DEVIS_COLOR={brouillon:C.muted,envoyé:C.blue,accepté:C.green,refusé:C.red};
+
+function useTheme(){
+  const [theme,setTheme] = useState(function(){ try{ var s=localStorage.getItem("jm_theme"); return s?Object.assign({},DEFAULT_THEME,JSON.parse(s)):DEFAULT_THEME; }catch(e){ return DEFAULT_THEME; } });
+  function updateTheme(k,v){ setTheme(function(p){ var n=Object.assign({},p); n[k]=v; try{ localStorage.setItem("jm_theme",JSON.stringify(n)); }catch(e){} return n; }); }
+  function resetTheme(){ setTheme(DEFAULT_THEME); try{ localStorage.removeItem("jm_theme"); }catch(e){} }
+  return { theme, updateTheme, resetTheme };
+}
+
+function useBP(){
+  const [bp,setBp] = useState(function(){ var w=window.innerWidth; return w<480?"xs":w<768?"sm":w<1024?"md":"lg"; });
+  useEffect(function(){
+    function fn(){ var w=window.innerWidth; setBp(w<480?"xs":w<768?"sm":w<1024?"md":"lg"); }
+    window.addEventListener("resize",fn); return function(){ window.removeEventListener("resize",fn); };
+  },[]);
+  return { bp, isMobile: bp==="xs"||bp==="sm" };
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const CATS = ["Main d'oeuvre","Materiaux","Equipement","Transport","Sous-traitance","Divers"];
+const UNITES = ["U","m2","ml","m3","kg","t","forfait","h","j","ens."];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmt=n=>new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0}).format(n)+" XOF";
-const fmtS=n=>{const a=Math.abs(n);if(a>=1e6)return(n/1e6).toFixed(1)+"M XOF";if(a>=1e3)return Math.round(n/1e3)+"k XOF";return n+" XOF";};
-const pct=(v,t)=>t>0?Math.round(v/t*100):0;
-const today=()=>new Date().toISOString().slice(0,10);
-const addDays=(d,n)=>{const dt=new Date(d);dt.setDate(dt.getDate()+n);return dt.toISOString().slice(0,10);};
-const stC=s=>({"En cours":C.blue,"En dérive":C.red,"Clôturé":C.green,"Planifié":C.yellow,"En pause":C.light,"Brouillon":C.muted,"En réception":C.orange}[s]||C.muted);
-const catC=c=>({"Main d'œuvre":C.blue,"Matériaux":C.orange,"Équipement":C.yellow,"Transport":C.green,"Sous-traitance":C.purple,"Divers":C.muted}[c]||C.muted);
-const totalDep=c=>(c.depenses||[]).reduce((a,d)=>a+Number(d.montant),0);
-const ssb=(d,b)=>{const p=pct(d,b);if(p>100)return"Dépassement";if(p>=80)return"80% consommé";return"Conforme";};
-const sbC=s=>({Conforme:C.green,"80% consommé":C.yellow,Dépassement:C.red}[s]||C.muted);
-const genAlertes=ch=>{const al=[];ch.forEach(c=>{const d=totalDep(c),p=pct(d,c.budgetInitial);if(p>100)al.push({niveau:"critique",msg:"Dépassement budget : "+p+"%",chantier:c});else if(p>=80)al.push({niveau:"warning",msg:"Budget à "+p+"% consommé",chantier:c});if(c.statut==="En dérive")al.push({niveau:"critique",msg:"Chantier en dérive",chantier:c});});return al;};
-let _devisSeq=1000;
-const genNumero=()=>{_devisSeq++;return"DEV-"+new Date().getFullYear()+"-"+String(_devisSeq).padStart(4,"0");};
-
-// ── Calculs devis ─────────────────────────────────────────────────────────────
-function calcDevis(articles,tauxTVA,tauxRemise){
-  const arts=articles.map(a=>({...a,total_ligne:parseFloat(((a.quantite||0)*(a.prix_unitaire||0)).toFixed(0))}));
-  const sousTotal=arts.reduce((s,a)=>s+a.total_ligne,0);
-  const montantRemise=parseFloat((sousTotal*(tauxRemise/100)).toFixed(0));
-  const baseImp=sousTotal-montantRemise;
-  const montantTVA=parseFloat((baseImp*(tauxTVA/100)).toFixed(0));
-  const totalTTC=baseImp+montantTVA;
-  return{articles:arts,sousTotal,montantRemise,baseImp,montantTVA,totalTTC};
-}
-
-// ── Génération Excel devis ────────────────────────────────────────────────────
-async function genererExcelDevis(devis,articles,calc,chantierNom,templateFile){
-  const wb=XLSX.utils.book_new();
-  const rows=[];
-  const entreprise={nom:"JEAN BTP SARL",adresse:"Zone Industrielle, Abidjan",tel:"+225 27 00 00 00",email:"devis@jeanbtp.ci",siret:"CI-ABJ-2024-B-12345"};
-
-  // En-têtes et infos
-  rows.push(["","","","","",""]);
-  rows.push([entreprise.nom,"","","DEVIS N°",devis.numero,""]);
-  rows.push([entreprise.adresse,"","","Date :",devis.date_creation,""]);
-  rows.push([entreprise.tel,"","","Validité :",devis.date_validite,""]);
-  rows.push([entreprise.email,"","","","",""]);
-  rows.push(["SIRET : "+entreprise.siret,"","","","",""]);
-  rows.push(["","","","","",""]);
-  rows.push(["POUR :","","","","",""]);
-  rows.push([devis.client_nom,"","","","",""]);
-  rows.push([devis.client_adresse,"","","","",""]);
-  rows.push([devis.client_telephone,"","","","",""]);
-  rows.push([devis.client_email,"","","","",""]);
-  if(chantierNom) rows.push(["Chantier : "+chantierNom,"","","","",""]);
-  rows.push(["","","","","",""]);
-  rows.push(["N°","DÉSIGNATION","QTÉ","UNITÉ","P.U. HT (XOF)","TOTAL HT (XOF)"]);
-
-  articles.forEach((a,i)=>{
-    rows.push([i+1,a.designation,a.quantite,a.unite,a.prix_unitaire,a.total_ligne]);
+function fmt(n){ return new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0}).format(n)+" XOF"; }
+function fmtS(n){ var a=Math.abs(n); if(a>=1e6) return (n/1e6).toFixed(1)+"M XOF"; if(a>=1e3) return Math.round(n/1e3)+"k XOF"; return n+" XOF"; }
+function pct(v,t){ return t>0?Math.round(v/t*100):0; }
+function today(){ return new Date().toISOString().slice(0,10); }
+function addDays(d,n){ var dt=new Date(d); dt.setDate(dt.getDate()+n); return dt.toISOString().slice(0,10); }
+function stC(s,T){ return ({  "En cours":T.secondary,"En derive":T.danger,"Cloture":T.success,"Planifie":T.warning,"En pause":T.muted,"Brouillon":T.muted,"En reception":T.primary}[s]||T.muted); }
+function catC(c,T){ return ({"Main d'oeuvre":T.secondary,"Materiaux":T.primary,"Equipement":T.warning,"Transport":T.success,"Sous-traitance":"#A855F7","Divers":T.muted}[c]||T.muted); }
+function totalDep(c){ return (c.depenses||[]).reduce(function(a,d){ return a+Number(d.montant); },0); }
+function ssbFn(d,b){ var p=pct(d,b); if(p>100) return "Depassement"; if(p>=80) return "80pct consomme"; return "Conforme"; }
+function sbC(s,T){ return ({Conforme:T.success,"80pct consomme":T.warning,Depassement:T.danger}[s]||T.muted); }
+function genAlertes(ch,T){
+  var al=[];
+  ch.forEach(function(c){
+    var d=totalDep(c), p=pct(d,c.budgetInitial);
+    if(p>100) al.push({niveau:"critique",msg:"Depassement budget : "+p+"%",chantier:c});
+    else if(p>=80) al.push({niveau:"warning",msg:"Budget a "+p+"% consomme",chantier:c});
+    if(c.statut==="En derive") al.push({niveau:"critique",msg:"Chantier en derive",chantier:c});
   });
+  return al;
+}
+var _seq=1000;
+function genNumero(){ _seq++; return "DEV-"+new Date().getFullYear()+"-"+String(_seq).padStart(4,"0"); }
 
-  rows.push(["","","","","",""]);
-  rows.push(["","","","","Sous-total HT",calc.sousTotal]);
-  if(devis.taux_remise>0) rows.push(["","","","","Remise ("+devis.taux_remise+"%)",-calc.montantRemise]);
-  rows.push(["","","","","Base imposable",calc.baseImp]);
-  rows.push(["","","","","TVA ("+devis.taux_tva+"%)",calc.montantTVA]);
-  rows.push(["","","","","","────────────"]);
-  rows.push(["","","","","TOTAL TTC",calc.totalTTC]);
-  rows.push(["","","","","",""]);
-  rows.push(["Conditions de paiement :","","","","",""]);
-  rows.push([devis.conditions_paiement,"","","","",""]);
-  if(devis.notes){rows.push(["","","","","",""]);rows.push(["Notes :","","","","",""]);rows.push([devis.notes,"","","","",""]);}
-  rows.push(["","","","","",""]);
-  rows.push(["Signature client :","","","Signature entreprise :","",""]);
-  rows.push(["","","","","",""]);
-  rows.push(["__________________________","","","__________________________","",""]);
-
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-
-  // Largeurs colonnes
-  ws["!cols"]=[{wch:6},{wch:40},{wch:10},{wch:10},{wch:20},{wch:20}];
-
-  // Merge cells titre entreprise
-  ws["!merges"]=[
-    {s:{r:1,c:0},e:{r:1,c:2}},
-    {s:{r:2,c:0},e:{r:2,c:2}},
-    {s:{r:3,c:0},e:{r:3,c:2}},
-    {s:{r:7,c:0},e:{r:7,c:5}},
-    {s:{r:8,c:0},e:{r:8,c:5}},
-  ];
-
-  XLSX.utils.book_append_sheet(wb,ws,"Devis");
-
-  // Si template uploadé, on génère quand même le fichier enrichi
-  const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-  const blob=new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement("a");
-  a.href=url;a.download=`Devis_${devis.numero}.xlsx`;a.click();
-  URL.revokeObjectURL(url);
+// ── Devis calculs ─────────────────────────────────────────────────────────────
+function calcDevis(lots, tauxTVA, tauxRemise){
+  var lotsCalc = (lots||[]).map(function(l){
+    if(l.type==="article") return Object.assign({},l,{total_ligne:Math.round((l.quantite||0)*(l.prix_unitaire||0))});
+    var arts = (l.articles||[]).map(function(a){ return Object.assign({},a,{total_ligne:Math.round((a.quantite||0)*(a.prix_unitaire||0))}); });
+    var sousLots = (l.sousLots||[]).map(function(sl){
+      var slArts = (sl.articles||[]).map(function(a){ return Object.assign({},a,{total_ligne:Math.round((a.quantite||0)*(a.prix_unitaire||0))}); });
+      return Object.assign({},sl,{articles:slArts,total:slArts.reduce(function(s,a){ return s+a.total_ligne; },0)});
+    });
+    var totalArts = arts.reduce(function(s,a){ return s+a.total_ligne; },0);
+    var totalSL = sousLots.reduce(function(s,sl){ return s+sl.total; },0);
+    return Object.assign({},l,{articles:arts,sousLots:sousLots,total:totalArts+totalSL});
+  });
+  var sousTotal = lotsCalc.reduce(function(s,l){ return s+(l.total||l.total_ligne||0); },0);
+  var montantRemise = Math.round(sousTotal*(tauxRemise/100));
+  var baseImp = sousTotal-montantRemise;
+  var montantTVA = Math.round(baseImp*(tauxTVA/100));
+  var totalTTC = baseImp+montantTVA;
+  return {lots:lotsCalc,sousTotal:sousTotal,montantRemise:montantRemise,baseImp:baseImp,montantTVA:montantTVA,totalTTC:totalTTC};
 }
 
-// ── Impression HTML ───────────────────────────────────────────────────────────
-function imprimerDevis(devis,articles,calc,chantierNom){
-  const entreprise={nom:"JEAN BTP SARL",adresse:"Zone Industrielle, Abidjan",tel:"+225 27 00 00 00",email:"devis@jeanbtp.ci",siret:"CI-ABJ-2024-B-12345"};
-  const html=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Devis ${devis.numero}</title>
-  <style>
-    body{margin:0;font-family:Arial,sans-serif;font-size:10pt;color:#222;}
-    .page{padding:2cm;}
-    .header{display:flex;justify-content:space-between;margin-bottom:24px;}
-    .ent{font-size:9pt;color:#555;line-height:1.6;}
-    .ent strong{font-size:13pt;color:#F97316;display:block;margin-bottom:4px;}
-    .badge{background:#F97316;color:#fff;padding:4px 16px;border-radius:4px;font-size:11pt;font-weight:bold;}
-    .meta{font-size:9pt;color:#555;margin-top:8px;line-height:1.6;}
-    .client-box{background:#f9f9f9;border:1px solid #ddd;border-radius:6px;padding:12px 16px;margin:16px 0;}
-    .client-box strong{display:block;font-size:9pt;color:#888;margin-bottom:4px;}
-    table{width:100%;border-collapse:collapse;margin:16px 0;}
-    th{background:#F97316;color:#fff;padding:8px;text-align:left;font-size:9pt;}
-    td{padding:7px 8px;font-size:9pt;border-bottom:1px solid #eee;}
-    tr:nth-child(even) td{background:#fafafa;}
-    .right{text-align:right;}
-    .totals{width:50%;margin-left:auto;border:1px solid #ddd;border-radius:6px;overflow:hidden;}
-    .totals tr td{padding:8px 14px;}
-    .totals .total-ttc{background:#F97316;color:#fff;font-weight:bold;font-size:11pt;}
-    .footer{margin-top:32px;font-size:9pt;color:#666;}
-    .signatures{display:flex;justify-content:space-between;margin-top:48px;}
-    .sig-box{width:45%;border-top:2px solid #333;padding-top:8px;font-size:9pt;}
-    @page{margin:1.5cm;size:A4;}
-  </style></head><body><div class="page">
-  <div class="header">
-    <div class="ent"><strong>${entreprise.nom}</strong>${entreprise.adresse}<br>${entreprise.tel}<br>${entreprise.email}<br>SIRET : ${entreprise.siret}</div>
-    <div style="text-align:right">
-      <div class="badge">DEVIS</div>
-      <div class="meta"><strong>N° ${devis.numero}</strong><br>Date : ${devis.date_creation}<br>Validité : ${devis.date_validite}</div>
-    </div>
-  </div>
-  <div class="client-box">
-    <strong>DESTINATAIRE</strong>
-    <b>${devis.client_nom}</b><br>
-    ${devis.client_adresse||""}<br>${devis.client_telephone||""} ${devis.client_email?`· ${devis.client_email}`:""}
-    ${chantierNom?`<br><span style="color:#F97316">🏗️ Chantier : ${chantierNom}</span>`:""}
-  </div>
-  <table>
-    <thead><tr><th>#</th><th>Désignation</th><th class="right">Qté</th><th>Unité</th><th class="right">P.U. HT</th><th class="right">Total HT</th></tr></thead>
-    <tbody>
-      ${articles.map((a,i)=>`<tr><td>${i+1}</td><td>${a.designation}</td><td class="right">${a.quantite}</td><td>${a.unite}</td><td class="right">${fmt(a.prix_unitaire)}</td><td class="right">${fmt(a.total_ligne)}</td></tr>`).join("")}
-    </tbody>
-  </table>
-  <table class="totals">
-    <tr><td>Sous-total HT</td><td class="right">${fmt(calc.sousTotal)}</td></tr>
-    ${devis.taux_remise>0?`<tr><td>Remise (${devis.taux_remise}%)</td><td class="right" style="color:#ef4444">-${fmt(calc.montantRemise)}</td></tr>`:""}
-    ${devis.taux_remise>0?`<tr><td>Base imposable</td><td class="right">${fmt(calc.baseImp)}</td></tr>`:""}
-    <tr><td>TVA (${devis.taux_tva}%)</td><td class="right">${fmt(calc.montantTVA)}</td></tr>
-    <tr class="total-ttc"><td><b>TOTAL TTC</b></td><td class="right"><b>${fmt(calc.totalTTC)}</b></td></tr>
-  </table>
-  <div class="footer">
-    <b>Conditions de paiement :</b><br>${devis.conditions_paiement||"—"}
-    ${devis.notes?`<br><br><b>Notes :</b><br>${devis.notes}`:""}
-  </div>
-  <div class="signatures">
-    <div class="sig-box">Signature client</div>
-    <div class="sig-box" style="text-align:right">Signature ${entreprise.nom}</div>
-  </div>
-</div></body></html>`;
-  const w=window.open("","_blank");
-  w.document.write(html);w.document.close();
-  setTimeout(()=>{w.focus();w.print();},400);
+// ── PDF ───────────────────────────────────────────────────────────────────────
+function exportPDF(devis, calc, chantierNom, T){
+  var ent = {nom:T.companyName,adresse:T.companyAddress,tel:T.companyTel,email:T.companyEmail,siret:T.companySiret};
+  var rows="";
+  (calc.lots||[]).forEach(function(l,li){
+    if(l.type==="lot"){
+      rows+='<tr style="background:'+T.primary+'22"><td colspan="6" style="padding:8px 10px;font-weight:800;color:'+T.primary+'">LOT '+(li+1)+' - '+l.nom+'<span style="float:right">'+fmt(l.total)+'</span></td></tr>';
+      (l.articles||[]).forEach(function(a,ai){ rows+='<tr><td>'+(li+1)+'.'+(ai+1)+'</td><td>'+a.designation+'</td><td>'+a.quantite+'</td><td>'+a.unite+'</td><td style="text-align:right">'+fmt(a.prix_unitaire)+'</td><td style="text-align:right;font-weight:700;color:'+T.primary+'">'+fmt(a.total_ligne)+'</td></tr>'; });
+      (l.sousLots||[]).forEach(function(sl,sli){
+        rows+='<tr style="background:'+T.secondary+'11"><td colspan="6" style="padding:6px 20px;font-weight:700;color:'+T.secondary+'">Sous-lot '+(li+1)+'.'+(sli+1)+' - '+sl.nom+'<span style="float:right">'+fmt(sl.total)+'</span></td></tr>';
+        (sl.articles||[]).forEach(function(a,ai){ rows+='<tr><td>'+(li+1)+'.'+(sli+1)+'.'+(ai+1)+'</td><td>'+a.designation+'</td><td>'+a.quantite+'</td><td>'+a.unite+'</td><td style="text-align:right">'+fmt(a.prix_unitaire)+'</td><td style="text-align:right;font-weight:700;color:'+T.primary+'">'+fmt(a.total_ligne)+'</td></tr>'; });
+      });
+    } else if(l.type==="article"){
+      rows+='<tr><td>'+(li+1)+'</td><td>'+l.designation+'</td><td>'+l.quantite+'</td><td>'+l.unite+'</td><td style="text-align:right">'+fmt(l.prix_unitaire)+'</td><td style="text-align:right;font-weight:700;color:'+T.primary+'">'+fmt(l.total_ligne)+'</td></tr>';
+    }
+  });
+  var remiseRow = devis.taux_remise>0?'<tr><td>Remise ('+devis.taux_remise+'%)</td><td style="text-align:right;color:#ef4444">- '+fmt(calc.montantRemise)+'</td></tr>':"";
+  var html='<!DOCTYPE html><html><head><meta charset="utf-8"><title>Devis '+devis.numero+'</title><style>body{font-family:sans-serif;margin:2cm;font-size:10pt}table{width:100%;border-collapse:collapse}th{background:'+T.primary+';color:#fff;padding:8px}td{padding:7px 10px;border-bottom:1px solid #eee}.ttc{background:'+T.primary+';color:#fff;font-weight:800}</style></head><body><h2 style="color:'+T.primary+'">'+ent.nom+'</h2><p>'+ent.adresse+' | '+ent.tel+' | '+ent.email+'</p><h1>DEVIS '+devis.numero+'</h1><p>Client : <b>'+devis.client_nom+'</b>'+(chantierNom?' | Chantier : '+chantierNom:'')+'</p><p>Date : '+devis.date_creation+' | Validite : '+devis.date_validite+'</p><table><thead><tr><th>#</th><th>Designation</th><th>Qte</th><th>Unite</th><th>P.U. HT</th><th>Total HT</th></tr></thead><tbody>'+rows+'</tbody></table><br><table style="width:300px;margin-left:auto"><tbody><tr><td>Sous-total HT</td><td style="text-align:right">'+fmt(calc.sousTotal)+'</td></tr>'+remiseRow+'<tr><td>TVA ('+devis.taux_tva+'%)</td><td style="text-align:right">'+fmt(calc.montantTVA)+'</td></tr><tr class="ttc"><td>TOTAL TTC</td><td style="text-align:right">'+fmt(calc.totalTTC)+'</td></tr></tbody></table></body></html>';
+  var w=window.open("","_blank"); w.document.write(html); w.document.close(); setTimeout(function(){ w.focus(); w.print(); },500);
 }
 
 // ── UI Atoms ──────────────────────────────────────────────────────────────────
-const Badge=({label,color,small})=><span style={{background:color+"22",color,border:"1px solid "+color+"55",borderRadius:6,padding:small?"2px 7px":"3px 10px",fontSize:small?10:11,fontWeight:600,whiteSpace:"nowrap"}}>{label}</span>;
-const PBar=({p,color,h})=><div style={{background:C.mid,borderRadius:99,height:h||8,overflow:"hidden"}}><div style={{width:Math.min(p,100)+"%",background:color||C.orange,height:"100%",borderRadius:99}}/></div>;
-const Card=({title,children,pad})=><div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:pad||"18px 20px"}}>{title&&<div style={{fontWeight:700,fontSize:14,marginBottom:14}}>{title}</div>}{children}</div>;
-const EmptyState=({msg,icon})=><div style={{textAlign:"center",padding:"40px 20px",color:C.muted}}><div style={{fontSize:40,marginBottom:12}}>{icon}</div><div style={{fontSize:14}}>{msg}</div></div>;
-const Spinner=()=><div style={{display:"flex",alignItems:"center",justifyContent:"center",height:200,flexDirection:"column",gap:12}}><div style={{width:36,height:36,border:"4px solid "+C.border,borderTop:"4px solid "+C.orange,borderRadius:"50%",animation:"spin 1s linear infinite"}}/><style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style></div>;
-const KpiCard=({icon,label,value,sub,color,compact})=><div style={{background:C.card,border:"1px solid "+C.border,borderRadius:compact?10:12,padding:compact?"12px 14px":"16px 20px",flex:1,minWidth:compact?100:130}}><div style={{fontSize:compact?18:22,marginBottom:3}}>{icon}</div><div style={{fontSize:compact?16:20,fontWeight:700,color:color||C.white,lineHeight:1.2}}>{value}</div><div style={{fontSize:compact?10:12,color:C.muted,marginTop:2}}>{label}</div>{sub&&<div style={{fontSize:10,color:C.light,marginTop:3}}>{sub}</div>}</div>;
-
-const Modal=({title,onClose,onSave,saveLabel,children,wide})=>(
-  <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-    <div style={{background:C.dark,border:"1px solid "+C.border,borderRadius:"20px 20px 0 0",padding:"24px 20px",width:"100%",maxWidth:wide?800:600,maxHeight:"94vh",overflow:"auto",WebkitOverflowScrolling:"touch"}}>
-      <div style={{width:40,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}>
-        <div style={{fontWeight:800,fontSize:16}}>{title}</div>
-        <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:20}}>✕</button>
-      </div>
-      {children}
-      {onSave&&<div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
-        <button onClick={onClose} style={{padding:"10px 20px",background:C.mid,color:C.white,border:"none",borderRadius:10,cursor:"pointer"}}>Annuler</button>
-        <button onClick={onSave} style={{padding:"10px 20px",background:C.orange,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer"}}>{saveLabel||"Enregistrer"}</button>
-      </div>}
+function Badge({label,color,small}){
+  return React.createElement("span",{style:{background:color+"22",color:color,border:"1px solid "+color+"55",borderRadius:6,padding:small?"2px 7px":"3px 10px",fontSize:small?10:11,fontWeight:600,whiteSpace:"nowrap"}},label);
+}
+function PBar({p,color,h}){
+  return React.createElement("div",{style:{background:"#57534E",borderRadius:99,height:h||8,overflow:"hidden"}},
+    React.createElement("div",{style:{width:Math.min(p,100)+"%",background:color,height:"100%",borderRadius:99}})
+  );
+}
+function EmptyState({msg,icon}){
+  return React.createElement("div",{style:{textAlign:"center",padding:"40px 20px",color:"#A8A29E"}},
+    React.createElement("div",{style:{fontSize:40,marginBottom:12}},icon),
+    React.createElement("div",{style:{fontSize:14}},msg)
+  );
+}
+function Spinner(){
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:200,flexDirection:"column",gap:12}}>
+      <div style={{width:36,height:36,border:"4px solid #57534E",borderTopColor:"#F97316",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
-  </div>
-);
+  );
+}
+function KpiCard({icon,label,value,color,compact,T}){
+  return (
+    <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:compact?10:T.borderRadius,padding:compact?"12px 14px":"16px 20px",flex:1,minWidth:compact?100:130}}>
+      <div style={{fontSize:compact?18:22,marginBottom:3}}>{icon}</div>
+      <div style={{fontSize:compact?15:19,fontWeight:700,color:color||T.white,lineHeight:1.2}}>{value}</div>
+      <div style={{fontSize:compact?10:12,color:T.muted,marginTop:2}}>{label}</div>
+    </div>
+  );
+}
+function Card({title,children,T}){
+  return (
+    <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+      {title&&<div style={{fontWeight:700,fontSize:14,marginBottom:14}}>{title}</div>}
+      {children}
+    </div>
+  );
+}
+function Modal({title,onClose,onSave,saveLabel,children,T}){
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:"20px 20px 0 0",padding:"24px 20px",width:"100%",maxWidth:860,maxHeight:"96vh",overflow:"auto"}}>
+        <div style={{width:40,height:4,background:T.border,borderRadius:99,margin:"0 auto 20px"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}>
+          <div style={{fontWeight:800,fontSize:16}}>{title}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:20}}>x</button>
+        </div>
+        {children}
+        {onSave&&(
+          <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}>
+            <button onClick={onClose} style={{padding:"10px 20px",background:T.mid,color:T.white,border:"none",borderRadius:10,cursor:"pointer"}}>Annuler</button>
+            <button onClick={onSave} style={{padding:"10px 20px",background:T.primary,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer"}}>{saveLabel||"Enregistrer"}</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+function FField({label,value,onChange,type,full,placeholder,rows,T}){
+  var s={width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 12px",color:T.white,fontSize:14,boxSizing:"border-box",outline:"none"};
+  return (
+    <div style={full?{gridColumn:"1/-1"}:{}}>
+      <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>{label}</label>
+      {rows
+        ? <textarea value={value} onChange={function(e){ onChange(e.target.value); }} rows={rows} placeholder={placeholder} style={s}/>
+        : <input type={type||"text"} value={value} onChange={function(e){ onChange(e.target.value); }} placeholder={placeholder} style={s}/>
+      }
+    </div>
+  );
+}
+function FSelect({label,value,onChange,options,full,T}){
+  return (
+    <div style={full?{gridColumn:"1/-1"}:{}}>
+      <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>{label}</label>
+      <select value={value} onChange={function(e){ onChange(e.target.value); }} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 12px",color:T.white,fontSize:14,boxSizing:"border-box",outline:"none"}}>
+        {options.map(function(o){ return Array.isArray(o)?<option key={o[0]} value={o[0]}>{o[1]}</option>:<option key={o} value={o}>{o}</option>; })}
+      </select>
+    </div>
+  );
+}
+function FGrid({children,cols}){
+  return <div style={{display:"grid",gridTemplateColumns:"repeat("+(cols||2)+",1fr)",gap:12}}>{children}</div>;
+}
 
-const FField=({label,value,onChange,type,full,placeholder,rows})=>(
-  <div style={full?{gridColumn:"1/-1"}:{}}>
-    <label style={{fontSize:11,color:C.muted,display:"block",marginBottom:4}}>{label}</label>
-    {rows?<textarea value={value} onChange={e=>onChange(e.target.value)} rows={rows} placeholder={placeholder} style={{width:"100%",background:C.mid,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.white,fontSize:14,boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
-    :<input type={type||"text"} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{width:"100%",background:C.mid,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.white,fontSize:14,boxSizing:"border-box",outline:"none",WebkitAppearance:"none"}}/>}
-  </div>
-);
-const FSelect=({label,value,onChange,options,full})=>(
-  <div style={full?{gridColumn:"1/-1"}:{}}>
-    <label style={{fontSize:11,color:C.muted,display:"block",marginBottom:4}}>{label}</label>
-    <select value={value} onChange={e=>onChange(e.target.value)} style={{width:"100%",background:C.mid,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.white,fontSize:14,boxSizing:"border-box",outline:"none",WebkitAppearance:"none"}}>
-      {options.map(o=>Array.isArray(o)?<option key={o[0]} value={o[0]}>{o[1]}</option>:<option key={o} value={o}>{o}</option>)}
-    </select>
-  </div>
-);
-const FGrid=({children,cols})=><div style={{display:"grid",gridTemplateColumns:`repeat(${cols||2},1fr)`,gap:12}}>{children}</div>;
-
-// ── Supabase data hook ────────────────────────────────────────────────────────
+// ── Data hook ─────────────────────────────────────────────────────────────────
 function useData(){
-  const [chantiers,setCh]=useState([]);
-  const [interventions,setInt]=useState([]);
-  const [devis,setDev]=useState([]);
-  const [loading,setLoading]=useState(true);
-  const [error,setError]=useState(null);
+  const [chantiers,setCh] = useState([]);
+  const [interventions,setInt] = useState([]);
+  const [loading,setLoading] = useState(true);
+  const [error,setError] = useState(null);
 
-  const load=async()=>{
-    setLoading(true);setError(null);
-    try{
-      const [r1,r2,r3,r4,r5]=await Promise.all([
-        sb.from("chantiers").order("created_at",{ascending:false}).get(),
-        sb.from("depenses").order("date",{ascending:false}).get(),
-        sb.from("interventions").order("created_at",{ascending:false}).get(),
-        sb.from("intervention_depenses").get(),
-        sb.from("intervention_todos").get()
-      ]);
-      if(r1.error)throw r1.error;
-      const ch=r1.data||[],dep=r2.data||[],intv=r3.data||[],idep=r4.data||[],todos=r5.data||[];
-      setCh(ch.map(c=>({...c,budgetInitial:Number(c.budget_initial),dateDebut:c.date_debut,dateFin:c.date_fin,alertes:c.alertes||[],depenses:dep.filter(d=>d.chantier_id===c.id).map(d=>({...d,montant:Number(d.montant)}))})));
-      setInt(intv.map(i=>({...i,dateCreation:i.date_creation,depenses:idep.filter(d=>d.intervention_id===i.id).map(d=>({...d,montant:Number(d.montant)})),todos:todos.filter(t=>t.intervention_id===i.id)})));
-      // Devis en mémoire (pas de table Supabase pour cette démo)
-    }catch(e){setError("Erreur : "+(e.message||JSON.stringify(e)));}
-    setLoading(false);
-  };
-  useEffect(()=>{load();},[]);
-  return{chantiers,interventions,devis,setDev,loading,error,reload:load};
+  function load(){
+    setLoading(true); setError(null);
+    Promise.all([
+      sb.from("chantiers").order("created_at",{ascending:false}).get(),
+      sb.from("depenses").order("date",{ascending:false}).get(),
+      sb.from("interventions").order("created_at",{ascending:false}).get(),
+      sb.from("intervention_depenses").get(),
+      sb.from("intervention_todos").get()
+    ]).then(function(results){
+      var r1=results[0],r2=results[1],r3=results[2],r4=results[3],r5=results[4];
+      if(r1.error) throw r1.error;
+      var ch=r1.data||[], dep=r2.data||[], intv=r3.data||[], idep=r4.data||[], todos=r5.data||[];
+      setCh(ch.map(function(c){ return Object.assign({},c,{budgetInitial:Number(c.budget_initial),dateDebut:c.date_debut,dateFin:c.date_fin,alertes:c.alertes||[],depenses:dep.filter(function(d){ return d.chantier_id===c.id; }).map(function(d){ return Object.assign({},d,{montant:Number(d.montant)}); })}); }));
+      setInt(intv.map(function(i){ return Object.assign({},i,{dateCreation:i.date_creation,depenses:idep.filter(function(d){ return d.intervention_id===i.id; }).map(function(d){ return Object.assign({},d,{montant:Number(d.montant)}); }),todos:todos.filter(function(x){ return x.intervention_id===i.id; })}); }));
+      setLoading(false);
+    }).catch(function(e){ setError("Erreur : "+(e.message||JSON.stringify(e))); setLoading(false); });
+  }
+  useEffect(function(){ load(); },[]);
+  return {chantiers,interventions,loading,error,reload:load};
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// APP
+// APP ROOT
 // ═════════════════════════════════════════════════════════════════════════════
 export default function App(){
-  const {chantiers,interventions,devis,setDev,loading,error,reload}=useData();
-  const {isMobile,bp}=useBP();
-  const [page,setPage]=useState("dashboard");
-  const [selId,setSelId]=useState(null);
-  const [onglet,setOnglet]=useState("infos");
-  const [drawerOpen,setDrawerOpen]=useState(false);
-  const [showNewCh,setShowNewCh]=useState(false);
-  const [filterSt,setFilterSt]=useState("Tous");
-  const [saving,setSaving]=useState(false);
-  const [newChForm,setNewChForm]=useState({nom:"",client:"",localisation:"",type:"Construction",budgetInitial:"",dateDebut:"",dateFin:""});
+  const {theme:T,updateTheme,resetTheme} = useTheme();
+  const {chantiers,interventions,loading,error,reload} = useData();
+  const {isMobile,bp} = useBP();
+  const [page,setPage] = useState("dashboard");
+  const [selId,setSelId] = useState(null);
+  const [onglet,setOnglet] = useState("infos");
+  const [drawerOpen,setDrawerOpen] = useState(false);
+  const [showNewCh,setShowNewCh] = useState(false);
+  const [filterSt,setFilterSt] = useState("Tous");
+  const [saving,setSaving] = useState(false);
+  const [newChForm,setNewChForm] = useState({nom:"",client:"",localisation:"",type:"Construction",budgetInitial:"",dateDebut:"",dateFin:""});
+  const [devis,setDevis] = useState([]);
 
-  const selected=chantiers.find(c=>c.id===selId);
-  const openCh=id=>{setSelId(id);setPage("fiche");setOnglet("infos");setDrawerOpen(false);};
-  const navTo=p=>{setPage(p);setDrawerOpen(false);};
+  var selected = chantiers.find(function(c){ return c.id===selId; });
 
-  const saveCh=async()=>{
-    if(!newChForm.nom||!newChForm.budgetInitial)return;
+  function openCh(id){ setSelId(id); setPage("fiche"); setOnglet("infos"); setDrawerOpen(false); }
+  function navTo(p){ setPage(p); setDrawerOpen(false); }
+
+  function saveCh(){
+    if(!newChForm.nom||!newChForm.budgetInitial) return;
     setSaving(true);
-    await sb.from("chantiers").insert({nom:newChForm.nom,client:newChForm.client,localisation:newChForm.localisation,type:newChForm.type,budget_initial:parseFloat(newChForm.budgetInitial),date_debut:newChForm.dateDebut||null,date_fin:newChForm.dateFin||null,statut:"Brouillon",alertes:[],score:100,lat:5.35,lng:-4.0});
-    setSaving(false);setShowNewCh(false);setNewChForm({nom:"",client:"",localisation:"",type:"Construction",budgetInitial:"",dateDebut:"",dateFin:""});reload();
-  };
-  const delCh=async id=>{await sb.from("chantiers").eq("id",id).del();setPage("chantiers");reload();};
+    sb.from("chantiers").insert({nom:newChForm.nom,client:newChForm.client,localisation:newChForm.localisation,type:newChForm.type,budget_initial:parseFloat(newChForm.budgetInitial),date_debut:newChForm.dateDebut||null,date_fin:newChForm.dateFin||null,statut:"Brouillon",alertes:[],score:100,lat:5.35,lng:-4.0}).then(function(){
+      setSaving(false); setShowNewCh(false); setNewChForm({nom:"",client:"",localisation:"",type:"Construction",budgetInitial:"",dateDebut:"",dateFin:""}); reload();
+    });
+  }
+  function delCh(id){ sb.from("chantiers").eq("id",id).del().then(function(){ setPage("chantiers"); reload(); }); }
 
-  const nbAl=genAlertes(chantiers).filter(a=>a.niveau==="critique").length;
-  const nbIntEC=interventions.filter(i=>i.statut==="En cours").length;
-  const nbDevBrouillon=devis.filter(d=>d.statut==="brouillon").length;
+  var nbAl = genAlertes(chantiers,T).filter(function(a){ return a.niveau==="critique"; }).length;
+  var nbIntEC = interventions.filter(function(i){ return i.statut==="En cours"; }).length;
 
-  const navItems=[
+  var navItems = [
     {key:"dashboard",icon:"📊",label:"Dashboard"},
     {key:"chantiers",icon:"🏗️",label:"Chantiers"},
-    {key:"devis",icon:"📄",label:"Devis",badge:nbDevBrouillon},
+    {key:"devis",icon:"📄",label:"Devis"},
     {key:"interventions",icon:"🔧",label:"Interventions",badge:nbIntEC},
     {key:"alertes",icon:"🔔",label:"Alertes",badge:nbAl},
     {key:"kpi",icon:"📈",label:"KPIs"},
     {key:"ia",icon:"🤖",label:"IA"},
     {key:"gestion",icon:"⚙️",label:"Gestion"},
+    {key:"styledevis",icon:"🖋",label:"Style Devis"},
+    {key:"debourse",icon:"🔢",label:"Debourse Sec"},
+    {key:"parametres",icon:"🎨",label:"Apparence"},
   ];
 
-  const Drawer=()=>(
-    <>{<div onClick={()=>setDrawerOpen(false)} style={{position:"fixed",inset:0,background:"#0007",zIndex:150}}/>}
-    <div style={{position:"fixed",left:0,top:0,bottom:0,width:280,background:C.dark,borderRight:"1px solid "+C.border,zIndex:151,padding:"50px 12px 12px",overflowY:"auto"}}>
-      <button onClick={()=>setDrawerOpen(false)} style={{position:"absolute",top:16,right:16,background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer"}}>✕</button>
-      <div style={{padding:"0 8px 16px",marginBottom:8,borderBottom:"1px solid "+C.border}}>
-        <div style={{fontWeight:700,fontSize:16}}>JEAN MANAGER</div>
-        <div style={{fontSize:11,color:C.orange}}>☁️ Supabase</div>
-      </div>
-      {navItems.map(n=>(
-        <button key={n.key} onClick={()=>navTo(n.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"14px 10px",borderRadius:8,border:"none",background:page===n.key?C.orange+"22":"transparent",color:page===n.key?C.orange:C.muted,cursor:"pointer",marginBottom:2,textAlign:"left"}}>
-          <span style={{fontSize:20}}>{n.icon}</span>
-          <span style={{fontSize:14,fontWeight:page===n.key?700:400,flex:1}}>{n.label}</span>
-          {n.badge>0&&<span style={{background:C.red,color:"#fff",borderRadius:99,fontSize:10,padding:"1px 7px",fontWeight:700}}>{n.badge}</span>}
-        </button>
-      ))}
-      <button onClick={()=>{reload();setDrawerOpen(false);}} style={{width:"100%",background:C.blue+"22",border:"1px solid "+C.blue+"44",color:C.blue,borderRadius:8,padding:10,fontSize:12,fontWeight:700,cursor:"pointer",marginTop:12}}>🔄 Synchroniser</button>
-    </div></>
-  );
-
-  const BottomBar=()=>(
-    <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.dark,borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-around",padding:"8px 0 max(8px,env(safe-area-inset-bottom))",zIndex:100}}>
-      {navItems.slice(0,5).map(n=>(
-        <button key={n.key} onClick={()=>navTo(n.key)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",color:page===n.key?C.orange:C.muted,cursor:"pointer",padding:"4px 6px",position:"relative",minWidth:44}}>
-          <span style={{fontSize:21}}>{n.icon}</span>
-          <span style={{fontSize:9,fontWeight:page===n.key?700:400}}>{n.label}</span>
-          {n.badge>0&&<span style={{position:"absolute",top:0,right:2,background:C.red,color:"#fff",borderRadius:99,fontSize:9,padding:"1px 5px",fontWeight:700}}>{n.badge}</span>}
-        </button>
-      ))}
-      <button onClick={()=>setDrawerOpen(true)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",color:C.muted,cursor:"pointer",padding:"4px 6px",minWidth:44}}>
-        <span style={{fontSize:21}}>☰</span><span style={{fontSize:9}}>Plus</span>
+  function NavBtn({n}){
+    return (
+      <button onClick={function(){ navTo(n.key); }} style={{width:"100%",display:"flex",alignItems:"center",gap:bp==="md"?0:10,padding:"10px",borderRadius:8,border:"none",background:page===n.key?T.primary+"22":"transparent",color:page===n.key?T.primary:T.muted,cursor:"pointer",marginBottom:2,justifyContent:bp==="md"?"center":"flex-start",position:"relative",fontFamily:T.fontFamily}}>
+        <span style={{fontSize:19,flexShrink:0}}>{n.icon}</span>
+        {bp!=="md"&&<span style={{fontSize:13,fontWeight:page===n.key?700:400,flex:1}}>{n.label}</span>}
+        {n.badge>0&&<span style={{position:"absolute",top:4,right:4,background:T.danger,color:"#fff",borderRadius:99,fontSize:9,padding:"1px 5px",fontWeight:700}}>{n.badge}</span>}
       </button>
-    </div>
-  );
+    );
+  }
 
-  return(
-    <div style={{display:"flex",height:"100vh",background:C.bg,color:C.white,fontFamily:"'Segoe UI',system-ui,sans-serif",overflow:"hidden"}}>
-      <style>{`*{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}input,select,textarea{font-size:16px!important;}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  function Drawer(){
+    return (
+      <>
+        <div onClick={function(){ setDrawerOpen(false); }} style={{position:"fixed",inset:0,background:"#0007",zIndex:150}}/>
+        <div style={{position:"fixed",left:0,top:0,bottom:0,width:280,background:T.card,borderRight:"1px solid "+T.border,zIndex:151,padding:"50px 12px 12px",overflowY:"auto"}}>
+          <button onClick={function(){ setDrawerOpen(false); }} style={{position:"absolute",top:16,right:16,background:"none",border:"none",color:T.muted,fontSize:22,cursor:"pointer"}}>x</button>
+          <div style={{padding:"0 8px 16px",marginBottom:8,borderBottom:"1px solid "+T.border}}>
+            <div style={{fontWeight:700,fontSize:16,color:T.white}}>{T.companyName}</div>
+          </div>
+          {navItems.map(function(n){ return <NavBtn key={n.key} n={n}/>; })}
+          <button onClick={function(){ reload(); setDrawerOpen(false); }} style={{width:"100%",background:T.secondary+"22",border:"1px solid "+T.secondary+"44",color:T.secondary,borderRadius:8,padding:10,fontSize:12,fontWeight:700,cursor:"pointer",marginTop:12}}>Synchroniser</button>
+        </div>
+      </>
+    );
+  }
 
-      {/* Desktop sidebar */}
+  function BottomBar(){
+    return (
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:T.card,borderTop:"1px solid "+T.border,display:"flex",justifyContent:"space-around",padding:"8px 0",zIndex:100}}>
+        {navItems.slice(0,5).map(function(n){
+          return (
+            <button key={n.key} onClick={function(){ navTo(n.key); }} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",color:page===n.key?T.primary:T.muted,cursor:"pointer",padding:"4px 6px",position:"relative",minWidth:44}}>
+              <span style={{fontSize:21}}>{n.icon}</span>
+              <span style={{fontSize:9,fontWeight:page===n.key?700:400}}>{n.label}</span>
+              {n.badge>0&&<span style={{position:"absolute",top:0,right:2,background:T.danger,color:"#fff",borderRadius:99,fontSize:9,padding:"1px 5px",fontWeight:700}}>{n.badge}</span>}
+            </button>
+          );
+        })}
+        <button onClick={function(){ setDrawerOpen(true); }} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,background:"none",border:"none",color:T.muted,cursor:"pointer",padding:"4px 6px",minWidth:44}}>
+          <span style={{fontSize:21}}>☰</span><span style={{fontSize:9}}>Plus</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{display:"flex",height:"100vh",background:T.bg,color:T.white,fontFamily:T.fontFamily,overflow:"hidden"}}>
+      <style>{`*{box-sizing:border-box;}input,select,textarea{font-size:16px!important;}@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+
       {!isMobile&&(
-        <div style={{width:bp==="md"?60:210,background:C.dark,borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",flexShrink:0}}>
-          <div style={{padding:"18px 12px 16px",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10}}>
-            <div style={{background:C.orange,borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏗</div>
-            {bp!=="md"&&<div><div style={{fontWeight:700,fontSize:13}}>JEAN MANAGER</div><div style={{fontSize:10,color:C.orange}}>☁️ Supabase</div></div>}
+        <div style={{width:bp==="md"?60:T.sidebarWidth,background:T.card,borderRight:"1px solid "+T.border,display:"flex",flexDirection:"column",flexShrink:0}}>
+          <div style={{padding:"18px 12px 16px",borderBottom:"1px solid "+T.border,display:"flex",alignItems:"center",gap:10}}>
+            <div style={{background:T.primary,borderRadius:10,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>🏗</div>
+            {bp!=="md"&&<div style={{fontWeight:700,fontSize:13,color:T.white}}>{T.companyName}</div>}
           </div>
           <nav style={{flex:1,padding:"10px 8px",overflowY:"auto"}}>
-            {navItems.map(n=>(
-              <button key={n.key} onClick={()=>setPage(n.key)} style={{width:"100%",display:"flex",alignItems:"center",gap:bp==="md"?0:10,padding:"10px",borderRadius:8,border:"none",background:page===n.key?C.orange+"22":"transparent",color:page===n.key?C.orange:C.muted,cursor:"pointer",marginBottom:2,justifyContent:bp==="md"?"center":"flex-start",position:"relative"}}>
-                <span style={{fontSize:19,flexShrink:0}}>{n.icon}</span>
-                {bp!=="md"&&<span style={{fontSize:13,fontWeight:page===n.key?700:400,flex:1}}>{n.label}</span>}
-                {n.badge>0&&(bp==="md"?<span style={{position:"absolute",top:4,right:4,background:C.red,color:"#fff",borderRadius:99,fontSize:9,padding:"1px 4px",fontWeight:700}}>{n.badge}</span>:<span style={{background:C.red,color:"#fff",borderRadius:99,fontSize:10,padding:"1px 6px",fontWeight:700}}>{n.badge}</span>)}
-              </button>
-            ))}
+            {navItems.map(function(n){ return <NavBtn key={n.key} n={n}/>; })}
           </nav>
-          {bp!=="md"&&<div style={{padding:8,borderTop:"1px solid "+C.border}}><button onClick={reload} style={{width:"100%",background:C.blue+"22",border:"1px solid "+C.blue+"44",color:C.blue,borderRadius:8,padding:8,fontSize:11,fontWeight:700,cursor:"pointer"}}>🔄 Sync</button></div>}
+          {bp!=="md"&&(
+            <div style={{padding:8,borderTop:"1px solid "+T.border}}>
+              <button onClick={reload} style={{width:"100%",background:T.secondary+"22",border:"1px solid "+T.secondary+"44",color:T.secondary,borderRadius:8,padding:8,fontSize:11,fontWeight:700,cursor:"pointer"}}>Sync</button>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Main */}
       <div style={{flex:1,overflow:"auto",display:"flex",flexDirection:"column",paddingBottom:isMobile?72:0}}>
-        {/* Topbar */}
-        <div style={{background:C.dark,borderBottom:"1px solid "+C.border,padding:isMobile?"12px 16px":"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,position:"sticky",top:0,zIndex:50}}>
+        <div style={{background:T.card,borderBottom:"1px solid "+T.border,padding:isMobile?"12px 16px":"12px 24px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0,position:"sticky",top:0,zIndex:50}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            {isMobile&&<button onClick={()=>setDrawerOpen(true)} style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer",padding:"0 4px"}}>☰</button>}
-            <div style={{fontSize:isMobile?14:16,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:isMobile?160:340}}>
-              {page==="fiche"&&selected?"🏗️ "+selected.nom:navItems.find(n=>n.key===page)?.icon+" "+navItems.find(n=>n.key===page)?.label}
+            {isMobile&&<button onClick={function(){ setDrawerOpen(true); }} style={{background:"none",border:"none",color:T.muted,fontSize:22,cursor:"pointer"}}>☰</button>}
+            <div style={{fontSize:isMobile?14:16,fontWeight:700}}>
+              {page==="fiche"&&selected?"🏗️ "+selected.nom:(navItems.find(function(n){ return n.key===page; })||{icon:"",label:""}).icon+" "+(navItems.find(function(n){ return n.key===page; })||{label:""}).label}
             </div>
           </div>
           <div style={{display:"flex",gap:8}}>
-            {(page==="chantiers"||page==="dashboard")&&<button onClick={()=>setShowNewCh(true)} style={{background:C.orange,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:13}}>+{isMobile?"":" Chantier"}</button>}
-            {page==="fiche"&&selected&&<button onClick={()=>{if(window.confirm("Supprimer ?"))delCh(selected.id);}} style={{background:C.red+"22",color:C.red,border:"1px solid "+C.red+"44",borderRadius:8,padding:"7px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>🗑️</button>}
+            {(page==="chantiers"||page==="dashboard")&&<button onClick={function(){ setShowNewCh(true); }} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Chantier</button>}
+            {page==="fiche"&&selected&&<button onClick={function(){ if(window.confirm("Supprimer ?")) delCh(selected.id); }} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"7px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>Supprimer</button>}
           </div>
         </div>
 
-        <div style={{flex:1,overflow:"auto",padding:isMobile?"12px":"24px",WebkitOverflowScrolling:"touch"}}>
-          {loading?<Spinner/>:error?(
-            <div style={{background:C.red+"11",border:"1px solid "+C.red+"44",borderRadius:12,padding:24,textAlign:"center"}}>
-              <div style={{fontSize:32,marginBottom:8}}>⚠️</div>
-              <div style={{color:C.red,fontWeight:700,marginBottom:8}}>Erreur Supabase</div>
-              <div style={{color:C.muted,fontSize:13,marginBottom:16}}>{error}</div>
-              <button onClick={reload} style={{background:C.orange,color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontWeight:700,cursor:"pointer"}}>🔄 Réessayer</button>
+        <div style={{flex:1,overflow:"auto",padding:isMobile?"12px":"24px"}}>
+          {loading ? <Spinner/> : error ? (
+            <div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:12,padding:24,textAlign:"center"}}>
+              <div style={{color:T.danger,fontWeight:700,marginBottom:8}}>Erreur Supabase</div>
+              <div style={{color:T.muted,fontSize:13,marginBottom:16}}>{error}</div>
+              <button onClick={reload} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"10px 24px",fontWeight:700,cursor:"pointer"}}>Reessayer</button>
             </div>
-          ):<>
-            {page==="dashboard"&&<DashboardPage chantiers={chantiers} openCh={openCh} interventions={interventions} devis={devis} navTo={navTo}/>}
-            {page==="chantiers"&&<ChantiersPage chantiers={chantiers} openCh={openCh} filter={filterSt} setFilter={setFilterSt} delCh={delCh}/>}
-            {page==="fiche"&&selected&&<FichePage chantier={selected} onglet={onglet} setOnglet={setOnglet} setPage={setPage} chantiers={chantiers} reload={reload}/>}
-            {page==="devis"&&<DevisPage devis={devis} setDev={setDev} chantiers={chantiers}/>}
-            {page==="interventions"&&<InterventionsPage interventions={interventions} chantiers={chantiers} reload={reload}/>}
-            {page==="alertes"&&<AlertesPage chantiers={chantiers} openCh={openCh}/>}
-            {page==="kpi"&&<KpiPage chantiers={chantiers}/>}
-            {page==="ia"&&<IAPage chantiers={chantiers} openCh={openCh} interventions={interventions}/>}
-            {page==="gestion"&&<GestionPage chantiers={chantiers} openCh={openCh} reload={reload}/>}
-          </>}
+          ) : (
+            <>
+              {page==="dashboard"&&<DashboardPage chantiers={chantiers} openCh={openCh} interventions={interventions} devis={devis} navTo={navTo} T={T}/>}
+              {page==="chantiers"&&<ChantiersPage chantiers={chantiers} openCh={openCh} filter={filterSt} setFilter={setFilterSt} delCh={delCh} T={T}/>}
+              {page==="fiche"&&selected&&<FichePage chantier={selected} onglet={onglet} setOnglet={setOnglet} setPage={setPage} reload={reload} T={T}/>}
+              {page==="devis"&&<DevisPage devis={devis} setDevis={setDevis} chantiers={chantiers} T={T}/>}
+              {page==="interventions"&&<InterventionsPage interventions={interventions} chantiers={chantiers} reload={reload} T={T}/>}
+              {page==="alertes"&&<AlertesPage chantiers={chantiers} openCh={openCh} T={T}/>}
+              {page==="kpi"&&<KpiPage chantiers={chantiers} T={T}/>}
+              {page==="ia"&&<IAPage chantiers={chantiers} openCh={openCh} interventions={interventions} T={T}/>}
+              {page==="gestion"&&<GestionPage chantiers={chantiers} openCh={openCh} reload={reload} T={T}/>}
+              {page==="styledevis"&&<StyleDevisPage T={T} updateTheme={updateTheme}/>}
+              {page==="debourse"&&<DeboursePage T={T}/>}
+              {page==="parametres"&&<ParametresPage T={T} updateTheme={updateTheme} resetTheme={resetTheme}/>}
+            </>
+          )}
         </div>
       </div>
 
@@ -415,16 +390,18 @@ export default function App(){
       {isMobile&&drawerOpen&&<Drawer/>}
 
       {showNewCh&&(
-        <Modal title="+ Nouveau Chantier" onClose={()=>setShowNewCh(false)} onSave={saveCh}>
-          {saving?<Spinner/>:<FGrid cols={2}>
-            <FField label="Nom *" value={newChForm.nom} onChange={v=>setNewChForm(p=>({...p,nom:v}))} full/>
-            <FField label="Client *" value={newChForm.client} onChange={v=>setNewChForm(p=>({...p,client:v}))}/>
-            <FSelect label="Type" value={newChForm.type} onChange={v=>setNewChForm(p=>({...p,type:v}))} options={["Construction","Réhabilitation","Maintenance"]}/>
-            <FField label="Localisation" value={newChForm.localisation} onChange={v=>setNewChForm(p=>({...p,localisation:v}))} full/>
-            <FField label="Budget (XOF) *" type="number" value={newChForm.budgetInitial} onChange={v=>setNewChForm(p=>({...p,budgetInitial:v}))} full/>
-            <FField label="Date début" type="date" value={newChForm.dateDebut} onChange={v=>setNewChForm(p=>({...p,dateDebut:v}))}/>
-            <FField label="Date fin" type="date" value={newChForm.dateFin} onChange={v=>setNewChForm(p=>({...p,dateFin:v}))}/>
-          </FGrid>}
+        <Modal title="+ Nouveau Chantier" onClose={function(){ setShowNewCh(false); }} onSave={saveCh} T={T}>
+          {saving?<Spinner/>:(
+            <FGrid cols={2}>
+              <FField label="Nom *" value={newChForm.nom} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{nom:v}); }); }} full T={T}/>
+              <FField label="Client" value={newChForm.client} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{client:v}); }); }} T={T}/>
+              <FSelect label="Type" value={newChForm.type} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{type:v}); }); }} options={["Construction","Rehabilitation","Maintenance"]} T={T}/>
+              <FField label="Localisation" value={newChForm.localisation} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{localisation:v}); }); }} T={T}/>
+              <FField label="Budget (XOF) *" type="number" value={newChForm.budgetInitial} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{budgetInitial:v}); }); }} full T={T}/>
+              <FField label="Date debut" type="date" value={newChForm.dateDebut} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{dateDebut:v}); }); }} T={T}/>
+              <FField label="Date fin" type="date" value={newChForm.dateFin} onChange={function(v){ setNewChForm(function(p){ return Object.assign({},p,{dateFin:v}); }); }} T={T}/>
+            </FGrid>
+          )}
         </Modal>
       )}
     </div>
@@ -432,592 +409,186 @@ export default function App(){
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// 📄 MODULE DEVIS — Page principale
+// DASHBOARD
 // ═════════════════════════════════════════════════════════════════════════════
-function DevisPage({devis,setDev,chantiers}){
-  const {isMobile}=useBP();
-  const [showForm,setShowForm]=useState(false);
-  const [editDevis,setEditDevis]=useState(null);
-  const [viewDevis,setViewDevis]=useState(null);
-  const [filterSt,setFilterSt]=useState("Tous");
-  const [templateFile,setTemplateFile]=useState(null);
-  const fileRef=useRef();
-
-  const statuts=["Tous","brouillon","envoyé","accepté","refusé"];
-  const filtered=filterSt==="Tous"?devis:devis.filter(d=>d.statut===filterSt);
-
-  const totalCA=devis.filter(d=>d.statut==="accepté").reduce((a,d)=>a+d.total_ttc,0);
-  const totalEnCours=devis.filter(d=>d.statut==="envoyé").reduce((a,d)=>a+d.total_ttc,0);
-  const txConversion=devis.length>0?Math.round(devis.filter(d=>d.statut==="accepté").length/devis.length*100):0;
-
-  const handleSave=(newDev)=>{
-    if(editDevis){
-      setDev(prev=>prev.map(d=>d.id===newDev.id?newDev:d));
-    } else {
-      setDev(prev=>[newDev,...prev]);
-    }
-    setShowForm(false);setEditDevis(null);
-  };
-
-  const handleDelete=id=>setDev(prev=>prev.filter(d=>d.id!==id));
-  const handleStatut=(id,s)=>setDev(prev=>prev.map(d=>d.id===id?{...d,statut:s}:d));
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {/* KPIs */}
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(5,1fr)",gap:10}}>
-        <KpiCard icon="📄" label="Total devis" value={devis.length} color={C.orange} compact={isMobile}/>
-        <KpiCard icon="✅" label="Acceptés" value={devis.filter(d=>d.statut==="accepté").length} color={C.green} compact={isMobile}/>
-        <KpiCard icon="📨" label="Envoyés" value={devis.filter(d=>d.statut==="envoyé").length} color={C.blue} compact={isMobile}/>
-        <KpiCard icon="💰" label="CA accepté" value={fmtS(totalCA)} color={C.green} compact={isMobile}/>
-        <KpiCard icon="📊" label="Taux conv." value={txConversion+"%"} color={txConversion>50?C.green:txConversion>25?C.yellow:C.red} compact={isMobile}/>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
-        {/* Template upload */}
-        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-          <div style={{fontSize:12,color:C.muted,flex:1}}>
-            📁 Template Excel : {templateFile?<span style={{color:C.green,fontWeight:700}}>✅ {templateFile.name}</span>:<span style={{color:C.yellow}}>⚠️ Aucun template — export standard</span>}
-          </div>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>setTemplateFile(e.target.files[0])}/>
-          <button onClick={()=>fileRef.current.click()} style={{background:C.blue+"22",color:C.blue,border:"1px solid "+C.blue+"44",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
-            📤 {templateFile?"Changer":"Importer"} template
-          </button>
-          {templateFile&&<button onClick={()=>setTemplateFile(null)} style={{background:C.red+"22",color:C.red,border:"1px solid "+C.red+"44",borderRadius:8,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>✕</button>}
-        </div>
-        {/* Filtres + bouton */}
-        <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{display:"flex",gap:4,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-            {statuts.map(s=>(
-              <button key={s} onClick={()=>setFilterSt(s)} style={{padding:"5px 12px",borderRadius:20,border:"1px solid "+(filterSt===s?C.orange:C.border),background:filterSt===s?C.orange:"transparent",color:filterSt===s?"#fff":C.muted,cursor:"pointer",fontSize:11,fontWeight:filterSt===s?700:400,whiteSpace:"nowrap",flexShrink:0,textTransform:"capitalize"}}>{s}</button>
-            ))}
-          </div>
-          <button onClick={()=>{setEditDevis(null);setShowForm(true);}} style={{background:C.orange,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0}}>+ Nouveau devis</button>
-        </div>
-      </div>
-
-      {/* Liste devis */}
-      {filtered.length===0&&<EmptyState msg="Aucun devis trouvé" icon="📄"/>}
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(380px,1fr))",gap:14}}>
-        {filtered.map(d=>{
-          const ch=chantiers.find(c=>c.id===d.chantier_id);
-          return(
-            <div key={d.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:18,display:"flex",flexDirection:"column",gap:12}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-                <div>
-                  <div style={{fontWeight:800,fontSize:15,color:C.orange}}>{d.numero}</div>
-                  <div style={{fontWeight:600,fontSize:14,marginTop:2}}>{d.client_nom}</div>
-                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>📅 {d.date_creation} · validité : {d.date_validite}</div>
-                  {ch&&<div style={{fontSize:11,color:C.muted}}>🏗️ {ch.nom}</div>}
-                </div>
-                <Badge label={d.statut} color={STATUT_DEVIS_COLOR[d.statut]||C.muted}/>
-              </div>
-
-              <div style={{background:C.mid,borderRadius:8,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontSize:10,color:C.muted}}>TOTAL TTC</div>
-                  <div style={{fontWeight:800,fontSize:18,color:C.orange}}>{fmt(d.total_ttc)}</div>
-                  <div style={{fontSize:10,color:C.muted}}>HT : {fmt(d.sous_total)} · TVA {d.taux_tva}%{d.taux_remise>0?" · Remise "+d.taux_remise+"%":""}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:10,color:C.muted}}>Articles</div>
-                  <div style={{fontWeight:700,fontSize:16}}>{(d.articles||[]).length}</div>
-                </div>
-              </div>
-
-              {/* Statut selector */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {["brouillon","envoyé","accepté","refusé"].map(s=>(
-                  <button key={s} onClick={()=>handleStatut(d.id,s)} style={{padding:"4px 10px",borderRadius:20,border:"1px solid "+(d.statut===s?(STATUT_DEVIS_COLOR[s]||C.orange):C.border),background:d.statut===s?(STATUT_DEVIS_COLOR[s]||C.orange)+"22":"transparent",color:d.statut===s?(STATUT_DEVIS_COLOR[s]||C.orange):C.muted,cursor:"pointer",fontSize:10,fontWeight:d.statut===s?700:400,textTransform:"capitalize"}}>{s}</button>
-                ))}
-              </div>
-
-              {/* Actions */}
-              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                <button onClick={()=>setViewDevis(d)} style={{flex:1,background:C.blue+"22",color:C.blue,border:"1px solid "+C.blue+"44",borderRadius:8,padding:"7px",fontSize:12,cursor:"pointer",fontWeight:600}}>👁️ Aperçu</button>
-                <button onClick={()=>{genererExcelDevis(d,d.articles||[],calcDevis(d.articles||[],d.taux_tva,d.taux_remise),ch?.nom,templateFile);}} style={{flex:1,background:C.green+"22",color:C.green,border:"1px solid "+C.green+"44",borderRadius:8,padding:"7px",fontSize:12,cursor:"pointer",fontWeight:600}}>📥 Excel</button>
-                <button onClick={()=>{imprimerDevis(d,d.articles||[],calcDevis(d.articles||[],d.taux_tva,d.taux_remise),ch?.nom);}} style={{flex:1,background:C.purple+"22",color:C.purple,border:"1px solid "+C.purple+"44",borderRadius:8,padding:"7px",fontSize:12,cursor:"pointer",fontWeight:600}}>🖨️ Print</button>
-                <button onClick={()=>{setEditDevis(d);setShowForm(true);}} style={{background:C.yellow+"22",color:C.yellow,border:"1px solid "+C.yellow+"44",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>✏️</button>
-                <button onClick={()=>{if(window.confirm("Supprimer ce devis ?"))handleDelete(d.id);}} style={{background:C.red+"22",color:C.red,border:"1px solid "+C.red+"44",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>🗑️</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Formulaire devis */}
-      {showForm&&<DevisForm chantiers={chantiers} editDevis={editDevis} onSave={handleSave} onClose={()=>{setShowForm(false);setEditDevis(null);}}/>}
-
-      {/* Aperçu devis */}
-      {viewDevis&&<DevisApercu devis={viewDevis} chantiers={chantiers} templateFile={templateFile} onClose={()=>setViewDevis(null)}/>}
-    </div>
-  );
-}
-
-// ─── Formulaire Devis complet ─────────────────────────────────────────────────
-function DevisForm({chantiers,editDevis,onSave,onClose}){
-  const {isMobile}=useBP();
-  const defArticle=()=>({id:Date.now(),designation:"",quantite:1,unite:"U",prix_unitaire:0,total_ligne:0});
-
-  const [form,setForm]=useState(editDevis||{
-    id:Date.now(),
-    numero:genNumero(),
-    statut:"brouillon",
-    client_nom:"",client_adresse:"",client_telephone:"",client_email:"",
-    chantier_id:"",
-    date_creation:today(),
-    date_validite:addDays(today(),30),
-    taux_tva:18,
-    taux_remise:0,
-    conditions_paiement:"30% à la commande, 40% à mi-chantier, 30% à la livraison.",
-    notes:"",
-    articles:[defArticle()]
-  });
-
-  const up=(k,v)=>setForm(p=>({...p,[k]:v}));
-  const upArt=(idx,k,v)=>setForm(p=>{
-    const arts=[...p.articles];
-    arts[idx]={...arts[idx],[k]:v};
-    if(k==="quantite"||k==="prix_unitaire") arts[idx].total_ligne=(arts[idx].quantite||0)*(arts[idx].prix_unitaire||0);
-    return{...p,articles:arts};
-  });
-  const addArt=()=>setForm(p=>({...p,articles:[...p.articles,defArticle()]}));
-  const delArt=idx=>setForm(p=>({...p,articles:p.articles.filter((_,i)=>i!==idx)}));
-
-  const calc=calcDevis(form.articles,form.taux_tva,form.taux_remise);
-
-  const handleSave=()=>{
-    if(!form.client_nom){alert("Le nom du client est requis.");return;}
-    onSave({...form,...calc,sous_total:calc.sousTotal,montant_tva:calc.montantTVA,montant_remise:calc.montantRemise,total_ttc:calc.totalTTC,articles:calc.articles});
-  };
-
-  const sectionTitle=t=><div style={{fontWeight:700,fontSize:13,color:C.orange,marginBottom:12,marginTop:4,borderBottom:"1px solid "+C.border,paddingBottom:6}}>{t}</div>;
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:C.dark,border:"1px solid "+C.border,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:800,maxHeight:"96vh",overflow:"auto",WebkitOverflowScrolling:"touch",padding:"24px 20px"}}>
-        <div style={{width:40,height:4,background:C.border,borderRadius:99,margin:"0 auto 20px"}}/>
-
-        {/* Header */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div>
-            <div style={{fontWeight:800,fontSize:18}}>{editDevis?"✏️ Modifier":"📄 Nouveau"} Devis</div>
-            <div style={{fontSize:12,color:C.orange,fontWeight:700,marginTop:2}}>{form.numero}</div>
-          </div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer"}}>✕</button>
-        </div>
-
-        {/* Section client */}
-        {sectionTitle("👤 Informations client")}
-        <FGrid cols={isMobile?1:2}>
-          <FField label="Nom client *" value={form.client_nom} onChange={v=>up("client_nom",v)} placeholder="SARL CONSTRUIRE ABIDJAN" full={isMobile}/>
-          <FSelect label="Chantier lié" value={form.chantier_id} onChange={v=>up("chantier_id",v)} options={[["","— Aucun —"],...chantiers.map(c=>[c.id,c.nom])]}/>
-          <FField label="Adresse client" value={form.client_adresse} onChange={v=>up("client_adresse",v)} placeholder="15 Avenue Houphouët-Boigny..."/>
-          <FField label="Téléphone" value={form.client_telephone} onChange={v=>up("client_telephone",v)} placeholder="+225 07 00 00 00"/>
-          <FField label="Email client" value={form.client_email} onChange={v=>up("client_email",v)} type="email" placeholder="contact@client.ci"/>
-          <FField label="Date validité" value={form.date_validite} onChange={v=>up("date_validite",v)} type="date"/>
-        </FGrid>
-
-        {/* Section articles */}
-        {sectionTitle("📦 Articles / Prestations")}
-        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:12}}>
-          {/* En-tête colonnes */}
-          {!isMobile&&(
-            <div style={{display:"grid",gridTemplateColumns:"2fr 80px 80px 120px 110px 36px",gap:6}}>
-              {["Désignation","Qté","Unité","P.U. HT","Total HT",""].map((h,i)=><div key={i} style={{fontSize:10,color:C.muted,fontWeight:700,padding:"0 4px"}}>{h}</div>)}
-            </div>
-          )}
-          {form.articles.map((a,idx)=>(
-            <div key={a.id} style={{background:C.mid,borderRadius:10,padding:"10px 12px"}}>
-              {isMobile?(
-                <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                    <div style={{background:C.orange,color:"#fff",borderRadius:6,width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0}}>{idx+1}</div>
-                    <input value={a.designation} onChange={e=>upArt(idx,"designation",e.target.value)} placeholder="Désignation..." style={{flex:1,background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"7px 10px",color:C.white,fontSize:14,outline:"none"}}/>
-                    <button onClick={()=>delArt(idx)} style={{background:C.red+"22",border:"none",color:C.red,borderRadius:6,padding:"6px 8px",cursor:"pointer",flexShrink:0}}>🗑️</button>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
-                    <div><div style={{fontSize:9,color:C.muted,marginBottom:2}}>QTÉ</div><input type="number" value={a.quantite} onChange={e=>upArt(idx,"quantite",parseFloat(e.target.value)||0)} style={{width:"100%",background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"6px 8px",color:C.white,fontSize:14,outline:"none"}}/></div>
-                    <div><div style={{fontSize:9,color:C.muted,marginBottom:2}}>UNITÉ</div>
-                      <select value={a.unite} onChange={e=>upArt(idx,"unite",e.target.value)} style={{width:"100%",background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"6px 8px",color:C.white,fontSize:14,outline:"none",WebkitAppearance:"none"}}>
-                        {UNITES.map(u=><option key={u} value={u}>{u}</option>)}
-                      </select>
-                    </div>
-                    <div><div style={{fontSize:9,color:C.muted,marginBottom:2}}>P.U. HT</div><input type="number" value={a.prix_unitaire} onChange={e=>upArt(idx,"prix_unitaire",parseFloat(e.target.value)||0)} style={{width:"100%",background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"6px 8px",color:C.white,fontSize:14,outline:"none"}}/></div>
-                  </div>
-                  <div style={{textAlign:"right",fontWeight:700,color:C.orange}}>Total : {fmt(a.total_ligne)}</div>
-                </div>
-              ):(
-                <div style={{display:"grid",gridTemplateColumns:"2fr 80px 80px 120px 110px 36px",gap:6,alignItems:"center"}}>
-                  <input value={a.designation} onChange={e=>upArt(idx,"designation",e.target.value)} placeholder="Désignation de la prestation..." style={{background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"7px 10px",color:C.white,fontSize:14,outline:"none"}}/>
-                  <input type="number" value={a.quantite} onChange={e=>upArt(idx,"quantite",parseFloat(e.target.value)||0)} style={{background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"7px 8px",color:C.white,fontSize:14,outline:"none",textAlign:"center"}}/>
-                  <select value={a.unite} onChange={e=>upArt(idx,"unite",e.target.value)} style={{background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"7px 6px",color:C.white,fontSize:13,outline:"none",WebkitAppearance:"none",textAlign:"center"}}>
-                    {UNITES.map(u=><option key={u} value={u}>{u}</option>)}
-                  </select>
-                  <input type="number" value={a.prix_unitaire} onChange={e=>upArt(idx,"prix_unitaire",parseFloat(e.target.value)||0)} style={{background:C.dark,border:"1px solid "+C.border,borderRadius:7,padding:"7px 8px",color:C.white,fontSize:14,outline:"none",textAlign:"right"}}/>
-                  <div style={{fontWeight:700,color:C.orange,fontSize:13,textAlign:"right",padding:"0 4px"}}>{fmt(a.total_ligne)}</div>
-                  <button onClick={()=>delArt(idx)} style={{background:C.red+"22",border:"none",color:C.red,borderRadius:6,padding:"6px 8px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>🗑️</button>
-                </div>
-              )}
-            </div>
-          ))}
-          <button onClick={addArt} style={{background:C.orange+"22",border:"2px dashed "+C.orange+"66",color:C.orange,borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer",fontSize:13,width:"100%"}}>+ Ajouter un article</button>
-        </div>
-
-        {/* Section calculs */}
-        {sectionTitle("💰 Paramètres financiers")}
-        <FGrid cols={isMobile?1:3}>
-          <FField label="TVA (%)" type="number" value={form.taux_tva} onChange={v=>up("taux_tva",parseFloat(v)||0)}/>
-          <FField label="Remise (%)" type="number" value={form.taux_remise} onChange={v=>up("taux_remise",parseFloat(v)||0)}/>
-          <div style={{background:C.orange+"11",border:"1px solid "+C.orange+"44",borderRadius:8,padding:"10px 14px",display:"flex",flexDirection:"column",justifyContent:"center"}}>
-            <div style={{fontSize:10,color:C.muted}}>TOTAL TTC</div>
-            <div style={{fontWeight:800,fontSize:18,color:C.orange}}>{fmt(calc.totalTTC)}</div>
-          </div>
-        </FGrid>
-
-        {/* Preview calculs */}
-        <div style={{background:C.mid,borderRadius:10,padding:"14px 16px",marginTop:12}}>
-          {[
-            ["Sous-total HT",fmt(calc.sousTotal),C.white],
-            ...(form.taux_remise>0?[["Remise ("+form.taux_remise+"%)","- "+fmt(calc.montantRemise),C.red],["Base imposable",fmt(calc.baseImp),C.muted]]:  []),
-            ["TVA ("+form.taux_tva+"%)",fmt(calc.montantTVA),C.muted],
-          ].map(([k,v,col])=>(
-            <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:13,borderBottom:"1px solid "+C.border}}>
-              <span style={{color:C.muted}}>{k}</span><span style={{fontWeight:600,color:col}}>{v}</span>
-            </div>
-          ))}
-          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",marginTop:4}}>
-            <span style={{fontWeight:700,fontSize:14}}>TOTAL TTC</span>
-            <span style={{fontWeight:800,fontSize:16,color:C.orange}}>{fmt(calc.totalTTC)}</span>
-          </div>
-        </div>
-
-        {/* Conditions */}
-        {sectionTitle("📋 Conditions & Notes")}
-        <FGrid cols={1}>
-          <FField label="Conditions de paiement" value={form.conditions_paiement} onChange={v=>up("conditions_paiement",v)} rows={2} full/>
-          <FField label="Notes / Remarques" value={form.notes} onChange={v=>up("notes",v)} rows={2} full/>
-        </FGrid>
-
-        {/* Boutons */}
-        <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end",flexWrap:"wrap"}}>
-          <button onClick={onClose} style={{padding:"10px 20px",background:C.mid,color:C.white,border:"none",borderRadius:10,cursor:"pointer"}}>Annuler</button>
-          <button onClick={()=>{up("statut","brouillon");setTimeout(handleSave,50);}} style={{padding:"10px 20px",background:C.muted,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer"}}>💾 Brouillon</button>
-          <button onClick={handleSave} style={{padding:"10px 24px",background:C.orange,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer",fontSize:14}}>✅ Enregistrer</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Aperçu Devis ─────────────────────────────────────────────────────────────
-function DevisApercu({devis:d,chantiers,templateFile,onClose}){
-  const {isMobile}=useBP();
-  const ch=chantiers.find(c=>c.id===d.chantier_id);
-  const calc=calcDevis(d.articles||[],d.taux_tva,d.taux_remise);
-  const entreprise={nom:"JEAN BTP SARL",adresse:"Zone Industrielle, Abidjan",tel:"+225 27 00 00 00",email:"devis@jeanbtp.ci",siret:"CI-ABJ-2024-B-12345"};
-  return(
-    <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{background:"#fff",color:"#222",borderRadius:"20px 20px 0 0",width:"100%",maxWidth:780,maxHeight:"96vh",overflow:"auto",WebkitOverflowScrolling:"touch"}}>
-        {/* Toolbar aperçu */}
-        <div style={{background:C.dark,padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",borderRadius:"20px 20px 0 0",position:"sticky",top:0,zIndex:10}}>
-          <div style={{fontWeight:700,color:C.white,fontSize:14}}>👁️ Aperçu — {d.numero}</div>
-          <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>genererExcelDevis(d,d.articles||[],calc,ch?.nom,templateFile)} style={{background:C.green+"22",color:C.green,border:"1px solid "+C.green+"44",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>📥 Excel</button>
-            <button onClick={()=>imprimerDevis(d,d.articles||[],calc,ch?.nom)} style={{background:C.purple+"22",color:C.purple,border:"1px solid "+C.purple+"44",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>🖨️ Imprimer</button>
-            <button onClick={onClose} style={{background:"none",border:"none",color:C.muted,fontSize:22,cursor:"pointer"}}>✕</button>
-          </div>
-        </div>
-
-        {/* Corps du devis — style papier */}
-        <div style={{padding:isMobile?"16px":"32px",fontFamily:"Arial,sans-serif"}}>
-          {/* Header */}
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:24,gap:16,flexWrap:isMobile?"wrap":"nowrap"}}>
-            <div>
-              <div style={{fontSize:20,fontWeight:800,color:"#F97316"}}>{entreprise.nom}</div>
-              <div style={{fontSize:11,color:"#666",lineHeight:1.7,marginTop:4}}>{entreprise.adresse}<br/>{entreprise.tel}<br/>{entreprise.email}<br/>SIRET : {entreprise.siret}</div>
-            </div>
-            <div style={{textAlign:isMobile?"left":"right"}}>
-              <div style={{background:"#F97316",color:"#fff",borderRadius:6,padding:"6px 20px",fontWeight:800,fontSize:16,display:"inline-block"}}>DEVIS</div>
-              <div style={{fontSize:11,color:"#666",marginTop:8,lineHeight:1.7}}>N° <strong style={{color:"#222"}}>{d.numero}</strong><br/>Date : {d.date_creation}<br/>Validité : {d.date_validite}</div>
-            </div>
-          </div>
-
-          {/* Client */}
-          <div style={{background:"#FFF7ED",border:"1px solid #FED7AA",borderRadius:8,padding:"12px 16px",marginBottom:20}}>
-            <div style={{fontSize:10,color:"#888",fontWeight:700,marginBottom:6,letterSpacing:1}}>DESTINATAIRE</div>
-            <div style={{fontWeight:700,fontSize:14}}>{d.client_nom}</div>
-            {d.client_adresse&&<div style={{fontSize:12,color:"#555",marginTop:2}}>{d.client_adresse}</div>}
-            <div style={{fontSize:12,color:"#555",marginTop:2}}>{[d.client_telephone,d.client_email].filter(Boolean).join(" · ")}</div>
-            {ch&&<div style={{fontSize:11,color:"#F97316",marginTop:4,fontWeight:600}}>🏗️ Chantier : {ch.nom}</div>}
-          </div>
-
-          {/* Table articles */}
-          <table style={{width:"100%",borderCollapse:"collapse",marginBottom:20,fontSize:11}}>
-            <thead>
-              <tr style={{background:"#F97316",color:"#fff"}}>
-                <th style={{padding:"8px",textAlign:"left",borderRadius:"4px 0 0 4px"}}>#</th>
-                <th style={{padding:"8px",textAlign:"left"}}>Désignation</th>
-                {!isMobile&&<><th style={{padding:"8px",textAlign:"center"}}>Qté</th><th style={{padding:"8px",textAlign:"center"}}>Unité</th><th style={{padding:"8px",textAlign:"right"}}>P.U. HT</th></>}
-                <th style={{padding:"8px",textAlign:"right",borderRadius:"0 4px 4px 0"}}>Total HT</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(d.articles||[]).map((a,i)=>(
-                <tr key={a.id} style={{background:i%2===0?"#fff":"#fafafa",borderBottom:"1px solid #eee"}}>
-                  <td style={{padding:"8px",color:"#888",fontWeight:600}}>{i+1}</td>
-                  <td style={{padding:"8px"}}>
-                    <div style={{fontWeight:600}}>{a.designation}</div>
-                    {isMobile&&<div style={{fontSize:10,color:"#888"}}>{a.quantite} {a.unite} × {fmt(a.prix_unitaire)}</div>}
-                  </td>
-                  {!isMobile&&<><td style={{padding:"8px",textAlign:"center"}}>{a.quantite}</td><td style={{padding:"8px",textAlign:"center",color:"#888"}}>{a.unite}</td><td style={{padding:"8px",textAlign:"right"}}>{fmt(a.prix_unitaire)}</td></>}
-                  <td style={{padding:"8px",textAlign:"right",fontWeight:700,color:"#F97316"}}>{fmt(a.total_ligne)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Totaux */}
-          <div style={{display:"flex",justifyContent:"flex-end"}}>
-            <table style={{width:isMobile?"100%":"340px",borderCollapse:"collapse",border:"1px solid #eee",borderRadius:8,overflow:"hidden",fontSize:12}}>
-              <tbody>
-                <tr><td style={{padding:"8px 14px",color:"#666"}}>Sous-total HT</td><td style={{padding:"8px 14px",textAlign:"right",fontWeight:600}}>{fmt(calc.sousTotal)}</td></tr>
-                {d.taux_remise>0&&<tr style={{background:"#FFF5F5"}}><td style={{padding:"8px 14px",color:"#ef4444"}}>Remise ({d.taux_remise}%)</td><td style={{padding:"8px 14px",textAlign:"right",color:"#ef4444",fontWeight:600}}>- {fmt(calc.montantRemise)}</td></tr>}
-                {d.taux_remise>0&&<tr><td style={{padding:"8px 14px",color:"#666"}}>Base imposable</td><td style={{padding:"8px 14px",textAlign:"right",fontWeight:600}}>{fmt(calc.baseImp)}</td></tr>}
-                <tr><td style={{padding:"8px 14px",color:"#666"}}>TVA ({d.taux_tva}%)</td><td style={{padding:"8px 14px",textAlign:"right",fontWeight:600}}>{fmt(calc.montantTVA)}</td></tr>
-                <tr style={{background:"#F97316"}}><td style={{padding:"10px 14px",color:"#fff",fontWeight:800,fontSize:13}}>TOTAL TTC</td><td style={{padding:"10px 14px",textAlign:"right",color:"#fff",fontWeight:800,fontSize:15}}>{fmt(calc.totalTTC)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* Footer */}
-          {(d.conditions_paiement||d.notes)&&<div style={{marginTop:24,padding:"14px 16px",background:"#f9f9f9",borderRadius:8,fontSize:11,color:"#555"}}>
-            {d.conditions_paiement&&<><strong style={{display:"block",marginBottom:4}}>Conditions de paiement :</strong><p style={{margin:0}}>{d.conditions_paiement}</p></>}
-            {d.notes&&<><strong style={{display:"block",marginTop:10,marginBottom:4}}>Notes :</strong><p style={{margin:0}}>{d.notes}</p></>}
-          </div>}
-
-          {/* Signatures */}
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:32,gap:20}}>
-            {["Signature client","Signature "+entreprise.nom].map(s=>(
-              <div key={s} style={{flex:1,borderTop:"2px solid #333",paddingTop:8,fontSize:11,color:"#666",textAlign:"center"}}>{s}</div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
-// Pages existantes (Dashboard, Chantiers, Fiche, Interventions, etc.)
-// ═════════════════════════════════════════════════════════════════════════════
-
-function DashboardPage({chantiers,openCh,interventions,devis,navTo}){
-  const {isMobile}=useBP();
-  const totalB=chantiers.reduce((a,c)=>a+c.budgetInitial,0);
-  const totalD=chantiers.reduce((a,c)=>a+totalDep(c),0);
-  const totalDevisCA=devis.filter(d=>d.statut==="accepté").reduce((a,d)=>a+d.total_ttc,0);
-  const pieData=[
-    {name:"En cours",value:chantiers.filter(c=>c.statut==="En cours").length,color:C.blue},
-    {name:"En dérive",value:chantiers.filter(c=>c.statut==="En dérive").length,color:C.red},
-    {name:"Planifié",value:chantiers.filter(c=>c.statut==="Planifié").length,color:C.yellow},
-    {name:"Clôturé",value:chantiers.filter(c=>c.statut==="Clôturé").length,color:C.green},
-  ].filter(d=>d.value>0);
-  return(
+function DashboardPage({chantiers,openCh,interventions,devis,navTo,T}){
+  const {isMobile} = useBP();
+  var totalB = chantiers.reduce(function(a,c){ return a+c.budgetInitial; },0);
+  var totalD = chantiers.reduce(function(a,c){ return a+totalDep(c); },0);
+  var totalCA = devis.filter(function(d){ return d.statut==="accepte"; }).reduce(function(a,d){ return a+d.total_ttc; },0);
+  var pieData = [
+    {name:"En cours",value:chantiers.filter(function(c){ return c.statut==="En cours"; }).length,color:T.secondary},
+    {name:"En derive",value:chantiers.filter(function(c){ return c.statut==="En derive"; }).length,color:T.danger},
+    {name:"Planifie",value:chantiers.filter(function(c){ return c.statut==="Planifie"; }).length,color:T.warning},
+    {name:"Cloture",value:chantiers.filter(function(c){ return c.statut==="Cloture"; }).length,color:T.success}
+  ].filter(function(d){ return d.value>0; });
+  var pc = pct(totalD,totalB);
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(5,1fr)",gap:10}}>
-        <KpiCard icon="🏗️" label="Chantiers" value={chantiers.length} color={C.orange} compact={isMobile}/>
-        <KpiCard icon="💰" label="Budget" value={fmtS(totalB)} compact={isMobile}/>
-        <KpiCard icon="📊" label="Consommé" value={pct(totalD,totalB)+"%"} color={pct(totalD,totalB)>80?C.red:C.green} compact={isMobile}/>
-        <KpiCard icon="📄" label="Devis CA" value={fmtS(totalDevisCA)} color={C.green} compact={isMobile}/>
-        <KpiCard icon="🔧" label="Interventions" value={interventions.filter(i=>i.statut==="En cours").length} color={C.blue} compact={isMobile}/>
+        <KpiCard icon="🏗️" label="Chantiers" value={chantiers.length} color={T.primary} compact={isMobile} T={T}/>
+        <KpiCard icon="💰" label="Budget" value={fmtS(totalB)} compact={isMobile} T={T}/>
+        <KpiCard icon="📊" label="Consomme" value={pc+"%"} color={pc>80?T.danger:T.success} compact={isMobile} T={T}/>
+        <KpiCard icon="📄" label="CA Devis" value={fmtS(totalCA)} color={T.success} compact={isMobile} T={T}/>
+        <KpiCard icon="🔧" label="Interventions" value={interventions.filter(function(i){ return i.statut==="En cours"; }).length} color={T.secondary} compact={isMobile} T={T}/>
       </div>
-
-      {/* Raccourci devis */}
-      {devis.filter(d=>d.statut==="envoyé").length>0&&(
-        <div onClick={()=>navTo("devis")} style={{background:C.blue+"11",border:"1px solid "+C.blue+"44",borderRadius:12,padding:"14px 18px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{fontWeight:700,color:C.blue}}>📨 {devis.filter(d=>d.statut==="envoyé").length} devis en attente de réponse</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Cliquez pour gérer</div></div>
-          <span style={{color:C.blue,fontSize:20}}>→</span>
-        </div>
-      )}
-
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16}}>
-        <Card title="Statuts chantiers">
+        <Card title="Statuts chantiers" T={T}>
           <ResponsiveContainer width="100%" height={180}>
-            <PieChart><Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={65} label={({name,value})=>name+"("+value+")"} labelLine={false}>
-              {pieData.map((d,i)=><Cell key={i} fill={d.color}/>)}
-            </Pie><Tooltip contentStyle={{background:C.dark,border:"1px solid "+C.border,color:C.white}}/></PieChart>
+            <PieChart>
+              <Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={65}>
+                {pieData.map(function(d,i){ return <Cell key={i} fill={d.color}/>; })}
+              </Pie>
+              <Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+            </PieChart>
           </ResponsiveContainer>
         </Card>
-        <Card title="Devis par statut">
-          {devis.length===0?<EmptyState msg="Aucun devis" icon="📄"/>:
-          <div style={{display:"flex",flexDirection:"column",gap:8,paddingTop:4}}>
-            {["brouillon","envoyé","accepté","refusé"].map(s=>{
-              const nb=devis.filter(d=>d.statut===s).length;
-              const total=devis.filter(d=>d.statut===s).reduce((a,d)=>a+d.total_ttc,0);
-              return nb>0&&(
-                <div key={s} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <Badge label={s} color={STATUT_DEVIS_COLOR[s]||C.muted} small/>
-                    <span style={{fontSize:12,color:C.muted}}>{nb} devis</span>
-                  </div>
-                  <span style={{fontWeight:700,fontSize:13}}>{fmtS(total)}</span>
-                </div>
-              );
-            })}
-          </div>}
+        <Card title="Chantiers actifs" T={T}>
+          {chantiers.filter(function(c){ return c.statut!=="Cloture"&&c.statut!=="Brouillon"; }).slice(0,5).map(function(c){
+            var d=totalDep(c), p=pct(d,c.budgetInitial);
+            return (
+              <div key={c.id} onClick={function(){ openCh(c.id); }} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:"1px solid "+T.border,cursor:"pointer"}}>
+                <div style={{flex:2}}><div style={{fontWeight:600,fontSize:13}}>{c.nom}</div><div style={{fontSize:11,color:T.muted}}>{c.client}</div></div>
+                <div style={{flex:1}}><PBar p={p} color={p>100?T.danger:p>80?T.warning:T.success} h={6}/><div style={{fontSize:10,color:T.muted,textAlign:"right",marginTop:2}}>{p}%</div></div>
+              </div>
+            );
+          })}
+          {chantiers.filter(function(c){ return c.statut!=="Cloture"&&c.statut!=="Brouillon"; }).length===0&&<EmptyState msg="Aucun chantier actif" icon="🏗️"/>}
         </Card>
       </div>
-
-      <Card title="Chantiers actifs">
-        {chantiers.filter(c=>c.statut!=="Clôturé"&&c.statut!=="Brouillon").slice(0,6).map(c=>{
-          const d=totalDep(c),p=pct(d,c.budgetInitial);
-          return(
-            <div key={c.id} onClick={()=>openCh(c.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:"1px solid "+C.border,cursor:"pointer"}}>
-              <div style={{flex:2}}><div style={{fontWeight:600,fontSize:13}}>{c.nom}</div><div style={{fontSize:11,color:C.muted}}>{c.client}</div></div>
-              <Badge label={c.statut} color={stC(c.statut)}/>
-              <div style={{flex:1,minWidth:80}}><PBar p={p} color={p>100?C.red:p>80?C.yellow:C.green} h={6}/><div style={{fontSize:10,color:C.muted,textAlign:"right",marginTop:2}}>{p}%</div></div>
-            </div>
-          );
-        })}
-        {chantiers.filter(c=>c.statut!=="Clôturé"&&c.statut!=="Brouillon").length===0&&<EmptyState msg="Aucun chantier actif" icon="🏗️"/>}
-      </Card>
     </div>
   );
 }
 
-function ChantiersPage({chantiers,openCh,filter,setFilter,delCh}){
-  const {isMobile}=useBP();
-  const sts=["Tous","Planifié","En cours","En dérive","Clôturé","Brouillon"];
-  const filtered=filter==="Tous"?chantiers:chantiers.filter(c=>c.statut===filter);
-  return(
+// ═════════════════════════════════════════════════════════════════════════════
+// CHANTIERS
+// ═════════════════════════════════════════════════════════════════════════════
+function ChantiersPage({chantiers,openCh,filter,setFilter,delCh,T}){
+  const {isMobile} = useBP();
+  var sts = ["Tous","Planifie","En cours","En derive","Cloture","Brouillon"];
+  var filtered = filter==="Tous"?chantiers:chantiers.filter(function(c){ return c.statut===filter; });
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{display:"flex",gap:6,overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:4}}>
-        {sts.map(s=><button key={s} onClick={()=>setFilter(s)} style={{padding:"6px 12px",borderRadius:20,border:"1px solid "+(filter===s?C.orange:C.border),background:filter===s?C.orange:"transparent",color:filter===s?"#fff":C.muted,cursor:"pointer",fontSize:12,fontWeight:filter===s?700:400,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>)}
+      <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:4}}>
+        {sts.map(function(s){
+          return <button key={s} onClick={function(){ setFilter(s); }} style={{padding:"6px 12px",borderRadius:20,border:"1px solid "+(filter===s?T.primary:T.border),background:filter===s?T.primary:"transparent",color:filter===s?"#fff":T.muted,cursor:"pointer",fontSize:12,fontWeight:filter===s?700:400,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>;
+        })}
       </div>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(320px,1fr))",gap:14}}>
-        {filtered.map(c=>{const d=totalDep(c),p=pct(d,c.budgetInitial),s=ssb(d,c.budgetInitial);return(
-          <div key={c.id} onClick={()=>openCh(c.id)} style={{background:C.card,border:"1px solid "+(s==="Dépassement"?C.red+"66":C.border),borderRadius:14,padding:16,cursor:"pointer",position:"relative"}}
-            onMouseEnter={e=>e.currentTarget.style.borderColor=C.orange} onMouseLeave={e=>e.currentTarget.style.borderColor=s==="Dépassement"?C.red+"66":C.border}>
-            <button onClick={e=>{e.stopPropagation();if(window.confirm("Supprimer ?"))delCh(c.id);}} style={{position:"absolute",top:12,right:12,background:C.red+"22",border:"1px solid "+C.red+"44",color:C.red,borderRadius:6,padding:"3px 10px",fontSize:12,cursor:"pointer"}}>🗑️</button>
-            <div style={{marginBottom:10,paddingRight:44}}><div style={{fontWeight:700,fontSize:15}}>{c.nom}</div><div style={{fontSize:12,color:C.muted}}>{c.client}</div>{c.localisation&&<div style={{fontSize:11,color:C.light}}>📍 {c.localisation}</div>}</div>
-            <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}><Badge label={c.statut} color={stC(c.statut)}/><Badge label={c.type} color={C.orange} small/><Badge label={s} color={sbC(s)} small/></div>
-            <div style={{marginBottom:4}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:C.muted}}>Budget</span><span style={{fontWeight:700,color:p>100?C.red:p>80?C.yellow:C.green}}>{p}%</span></div><PBar p={p} color={p>100?C.red:p>80?C.yellow:C.green}/></div>
-            <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border,fontSize:12,color:C.muted}}>{fmtS(d)} / {fmtS(c.budgetInitial)}</div>
-          </div>
-        );})}
+        {filtered.map(function(c){
+          var d=totalDep(c), p=pct(d,c.budgetInitial), s=ssbFn(d,c.budgetInitial);
+          return (
+            <div key={c.id} onClick={function(){ openCh(c.id); }} style={{background:T.card,border:"1px solid "+(s==="Depassement"?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:16,cursor:"pointer",position:"relative"}}>
+              <button onClick={function(e){ e.stopPropagation(); if(window.confirm("Supprimer ?")) delCh(c.id); }} style={{position:"absolute",top:12,right:12,background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"3px 10px",fontSize:12,cursor:"pointer"}}>Suppr.</button>
+              <div style={{marginBottom:10,paddingRight:60}}><div style={{fontWeight:700,fontSize:15}}>{c.nom}</div><div style={{fontSize:12,color:T.muted}}>{c.client}</div></div>
+              <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}><Badge label={c.statut} color={stC(c.statut,T)}/><Badge label={c.type} color={T.primary} small/></div>
+              <div style={{marginBottom:4}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:T.muted}}>Budget</span><span style={{fontWeight:700,color:p>100?T.danger:p>80?T.warning:T.success}}>{p}%</span></div><PBar p={p} color={p>100?T.danger:p>80?T.warning:T.success}/></div>
+              <div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+T.border,fontSize:12,color:T.muted}}>{fmtS(d)} / {fmtS(c.budgetInitial)}</div>
+            </div>
+          );
+        })}
       </div>
       {filtered.length===0&&<EmptyState msg="Aucun chantier" icon="🏗️"/>}
     </div>
   );
 }
 
-function FichePage({chantier:c,onglet,setOnglet,setPage,chantiers,reload}){
-  const {isMobile}=useBP();
-  const onglets=["infos","budget","dépenses"];
-  const dep=totalDep(c),depPct=pct(dep,c.budgetInitial),s=ssb(dep,c.budgetInitial);
-  const [showNewDep,setShowNewDep]=useState(false);
-  const [depForm,setDepForm]=useState({libelle:"",categorie:"Main d'œuvre",montant:"",date:today(),note:""});
-  const [filterCat,setFilterCat]=useState("Toutes");
-  const [showStatutMenu,setShowStatutMenu]=useState(false);
-  const [saving,setSaving]=useState(false);
-  const cycleVie=["Brouillon","Planifié","En cours","En pause","En dérive","En réception","Clôturé"];
-  const cycleIdx=cycleVie.indexOf(c.statut);
-  const changeSt=async st=>{await sb.from("chantiers").eq("id",c.id).update({statut:st});setShowStatutMenu(false);reload();};
-  const addDep=async()=>{
-    if(!depForm.libelle||!depForm.montant)return;setSaving(true);
-    await sb.from("depenses").insert({chantier_id:c.id,libelle:depForm.libelle,categorie:depForm.categorie,montant:parseFloat(depForm.montant),date:depForm.date,note:depForm.note});
-    setSaving(false);setShowNewDep(false);setDepForm({libelle:"",categorie:"Main d'œuvre",montant:"",date:today(),note:""});reload();
-  };
-  const delDep=async id=>{await sb.from("depenses").eq("id",id).del();reload();};
-  const filteredDep=filterCat==="Toutes"?c.depenses:c.depenses.filter(d=>d.categorie===filterCat);
-  return(
+// ═════════════════════════════════════════════════════════════════════════════
+// FICHE CHANTIER
+// ═════════════════════════════════════════════════════════════════════════════
+function FichePage({chantier:c,onglet,setOnglet,setPage,reload,T}){
+  const {isMobile} = useBP();
+  var dep = totalDep(c), depPct = pct(dep,c.budgetInitial);
+  const [showNewDep,setShowNewDep] = useState(false);
+  const [depForm,setDepForm] = useState({libelle:"",categorie:"Main d'oeuvre",montant:"",date:today(),note:""});
+  const [filterCat,setFilterCat] = useState("Toutes");
+  const [saving,setSaving] = useState(false);
+
+  function addDep(){
+    if(!depForm.libelle||!depForm.montant) return;
+    setSaving(true);
+    sb.from("depenses").insert({chantier_id:c.id,libelle:depForm.libelle,categorie:depForm.categorie,montant:parseFloat(depForm.montant),date:depForm.date,note:depForm.note}).then(function(){
+      setSaving(false); setShowNewDep(false); setDepForm({libelle:"",categorie:"Main d'oeuvre",montant:"",date:today(),note:""}); reload();
+    });
+  }
+  function delDep(id){ sb.from("depenses").eq("id",id).del().then(function(){ reload(); }); }
+  function changeSt(st){ sb.from("chantiers").eq("id",c.id).update({statut:st}).then(function(){ reload(); }); }
+
+  var filteredDep = filterCat==="Toutes"?c.depenses:c.depenses.filter(function(d){ return d.categorie===filterCat; });
+  var onglets = ["infos","budget","depenses"];
+
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
-      <button onClick={()=>setPage("chantiers")} style={{background:"none",border:"none",color:C.orange,cursor:"pointer",fontSize:13,marginBottom:12,textAlign:"left",padding:0}}>← Retour</button>
-      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:14,padding:isMobile?16:20,marginBottom:16}}>
+      <button onClick={function(){ setPage("chantiers"); }} style={{background:"none",border:"none",color:T.primary,cursor:"pointer",fontSize:13,marginBottom:12,textAlign:"left",padding:0}}>Retour</button>
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:isMobile?16:20,marginBottom:16}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:12}}>
-          <div style={{flex:1}}><div style={{fontSize:isMobile?18:22,fontWeight:800}}>{c.nom}</div><div style={{color:C.muted,fontSize:12,marginTop:4}}>👤 {c.client} · 📍 {c.localisation}</div></div>
-          <div style={{position:"relative"}}>
-            <button onClick={()=>setShowStatutMenu(p=>!p)} style={{display:"flex",alignItems:"center",gap:6,background:stC(c.statut)+"22",border:"2px solid "+stC(c.statut),borderRadius:8,padding:"6px 12px",color:stC(c.statut),cursor:"pointer",fontWeight:700,fontSize:12}}>{c.statut} ▼</button>
-            {showStatutMenu&&<div style={{position:"absolute",right:0,top:"calc(100% + 6px)",background:C.dark,border:"1px solid "+C.border,borderRadius:10,zIndex:50,minWidth:170,boxShadow:"0 8px 24px #0008"}}>
-              {cycleVie.map(st=><button key={st} onClick={()=>changeSt(st)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 14px",border:"none",background:c.statut===st?stC(st)+"22":"transparent",color:c.statut===st?stC(st):C.white,cursor:"pointer",fontSize:13,textAlign:"left"}}><div style={{width:8,height:8,borderRadius:"50%",background:stC(st)}}/>{st}</button>)}
-            </div>}
+          <div style={{flex:1}}><div style={{fontSize:isMobile?18:22,fontWeight:800}}>{c.nom}</div><div style={{color:T.muted,fontSize:12,marginTop:4}}>{c.client} - {c.localisation}</div></div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {["En cours","En derive","Planifie","Cloture"].map(function(st){
+              return <button key={st} onClick={function(){ changeSt(st); }} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(c.statut===st?stC(st,T):T.border),background:c.statut===st?stC(st,T)+"22":"transparent",color:c.statut===st?stC(st,T):T.muted,cursor:"pointer",fontSize:10,fontWeight:c.statut===st?700:400}}>{st}</button>;
+            })}
           </div>
         </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Badge label={c.type} color={C.orange} small/><Badge label={s} color={sbC(s)} small/></div>
-        <div style={{marginTop:14,overflowX:"auto",paddingBottom:4}}>
-          <div style={{display:"flex",alignItems:"center",minWidth:"max-content"}}>
-            {cycleVie.map((st,i)=>(
-              <div key={st} style={{display:"flex",alignItems:"center"}}>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                  <button onClick={()=>changeSt(st)} style={{width:26,height:26,borderRadius:"50%",background:i===cycleIdx?C.orange:i<cycleIdx?C.green:C.mid,border:i===cycleIdx?"3px solid #FED7AA":"3px solid transparent",display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#fff",cursor:"pointer"}}>{i<cycleIdx?"✓":i+1}</button>
-                  <div style={{fontSize:8,color:i===cycleIdx?C.orange:i<cycleIdx?C.green:C.muted,whiteSpace:"nowrap",fontWeight:i===cycleIdx?700:400}}>{st}</div>
-                </div>
-                {i<cycleVie.length-1&&<div style={{width:16,height:2,background:i<cycleIdx?C.green:C.mid,marginBottom:12,flexShrink:0}}/>}
-              </div>
-            ))}
-          </div>
-        </div>
+        <Badge label={c.statut} color={stC(c.statut,T)}/>
       </div>
-
-      <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
-        {onglets.map(o=><button key={o} onClick={()=>setOnglet(o)} style={{padding:"8px 14px",borderRadius:8,border:"1px solid "+(onglet===o?C.orange:C.border),background:onglet===o?C.orange:C.card,color:onglet===o?"#fff":C.muted,cursor:"pointer",fontSize:12,fontWeight:onglet===o?700:400,whiteSpace:"nowrap",flexShrink:0,textTransform:"capitalize"}}>{o}{o==="dépenses"&&c.depenses.length>0&&<span style={{background:C.yellow,color:C.dark,borderRadius:99,fontSize:9,padding:"1px 5px",fontWeight:800,marginLeft:4}}>{c.depenses.length}</span>}</button>)}
+      <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto"}}>
+        {onglets.map(function(o){
+          return <button key={o} onClick={function(){ setOnglet(o); }} style={{padding:"8px 14px",borderRadius:8,border:"1px solid "+(onglet===o?T.primary:T.border),background:onglet===o?T.primary:T.card,color:onglet===o?"#fff":T.muted,cursor:"pointer",fontSize:12,fontWeight:onglet===o?700:400,whiteSpace:"nowrap",flexShrink:0,textTransform:"capitalize"}}>{o}{o==="depenses"&&c.depenses.length>0&&<span style={{background:T.warning,color:T.card,borderRadius:99,fontSize:9,padding:"1px 5px",fontWeight:800,marginLeft:4}}>{c.depenses.length}</span>}</button>;
+        })}
       </div>
-
       {onglet==="infos"&&(
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}>
-          <Card title="Informations">
-            {[["Nom",c.nom],["Client",c.client],["Localisation",c.localisation],["Type",c.type],["Budget",fmt(c.budgetInitial)],["Dépenses",fmt(dep)],["Marge",fmt(c.budgetInitial-dep)],["Début",c.dateDebut],["Fin",c.dateFin]].map(([k,v])=>(
-              <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+C.border,fontSize:13,gap:8}}><span style={{color:C.muted}}>{k}</span><span style={{fontWeight:600,textAlign:"right",wordBreak:"break-word"}}>{v}</span></div>
-            ))}
+          <Card title="Informations" T={T}>
+            {[["Nom",c.nom],["Client",c.client],["Localisation",c.localisation],["Type",c.type],["Budget",fmt(c.budgetInitial)],["Depenses",fmt(dep)],["Marge",fmt(c.budgetInitial-dep)]].map(function(row){
+              return <div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+T.border,fontSize:13,gap:8}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:600}}>{row[1]}</span></div>;
+            })}
           </Card>
-          <Card title="Synthèse budget">
-            <div style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:C.muted}}>Consommé</span><strong style={{color:depPct>100?C.red:depPct>80?C.yellow:C.green}}>{depPct}%</strong></div><PBar p={depPct} color={depPct>100?C.red:depPct>80?C.yellow:C.green} h={14}/></div>
-            {[["Budget",fmt(c.budgetInitial),C.white],["Dépenses",fmt(dep),C.yellow],["Marge",fmt(c.budgetInitial-dep),c.budgetInitial-dep>=0?C.green:C.red]].map(([k,v,col])=>(
-              <div key={k} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+C.border,fontSize:13}}><span style={{color:C.muted}}>{k}</span><span style={{fontWeight:700,color:col}}>{v}</span></div>
-            ))}
+          <Card title="Budget" T={T}>
+            <div style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:T.muted}}>Consomme</span><strong style={{color:depPct>100?T.danger:depPct>80?T.warning:T.success}}>{depPct}%</strong></div><PBar p={depPct} color={depPct>100?T.danger:depPct>80?T.warning:T.success} h={14}/></div>
+            {[["Budget",fmt(c.budgetInitial),T.white],["Depenses",fmt(dep),T.warning],["Marge",fmt(c.budgetInitial-dep),c.budgetInitial-dep>=0?T.success:T.danger]].map(function(row){
+              return <div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:700,color:row[2]}}>{row[1]}</span></div>;
+            })}
           </Card>
         </div>
       )}
-
       {onglet==="budget"&&(
-        <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
-            <KpiCard icon="💰" label="Budget" value={fmtS(c.budgetInitial)} compact={isMobile}/>
-            <KpiCard icon="🧾" label="Dépenses" value={fmtS(dep)} color={C.yellow} compact={isMobile}/>
-            <KpiCard icon="💵" label="Marge" value={fmtS(c.budgetInitial-dep)} color={c.budgetInitial-dep>=0?C.green:C.red} compact={isMobile}/>
-            <KpiCard icon="📊" label="%" value={depPct+"%"} color={depPct>100?C.red:depPct>80?C.yellow:C.green} compact={isMobile}/>
-          </div>
-          <Card title="Consommation"><PBar p={depPct} color={depPct>100?C.red:depPct>80?C.yellow:C.green} h={20}/></Card>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+          <KpiCard icon="💰" label="Budget" value={fmtS(c.budgetInitial)} compact T={T}/>
+          <KpiCard icon="🧾" label="Depenses" value={fmtS(dep)} color={T.warning} compact T={T}/>
+          <KpiCard icon="💵" label="Marge" value={fmtS(c.budgetInitial-dep)} color={c.budgetInitial-dep>=0?T.success:T.danger} compact T={T}/>
+          <KpiCard icon="📊" label="%" value={depPct+"%"} color={depPct>100?T.danger:depPct>80?T.warning:T.success} compact T={T}/>
         </div>
       )}
-
-      {onglet==="dépenses"&&(
+      {onglet==="depenses"&&(
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           <div style={{display:"flex",gap:6,justifyContent:"space-between",flexWrap:"wrap"}}>
-            <div style={{display:"flex",gap:4,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-              {["Toutes",...CATS].map(cat=><button key={cat} onClick={()=>setFilterCat(cat)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filterCat===cat?C.orange:C.border),background:filterCat===cat?C.orange:"transparent",color:filterCat===cat?"#fff":C.muted,cursor:"pointer",fontSize:10,fontWeight:filterCat===cat?700:400,whiteSpace:"nowrap",flexShrink:0}}>{cat}</button>)}
+            <div style={{display:"flex",gap:4,overflowX:"auto"}}>
+              {["Toutes"].concat(CATS).map(function(cat){
+                return <button key={cat} onClick={function(){ setFilterCat(cat); }} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filterCat===cat?T.primary:T.border),background:filterCat===cat?T.primary:"transparent",color:filterCat===cat?"#fff":T.muted,cursor:"pointer",fontSize:10,whiteSpace:"nowrap",flexShrink:0}}>{cat}</button>;
+              })}
             </div>
-            <button onClick={()=>setShowNewDep(true)} style={{background:C.orange,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13,flexShrink:0}}>+ Ajouter</button>
+            <button onClick={function(){ setShowNewDep(true); }} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Ajouter</button>
           </div>
-          {filteredDep.length===0&&<EmptyState msg="Aucune dépense" icon="🧾"/>}
-          {filteredDep.map(d=>(
-            <div key={d.id} style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-              <div style={{flex:1}}><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}><div style={{width:7,height:7,borderRadius:"50%",background:catC(d.categorie)}}/><span style={{fontWeight:700,fontSize:13}}>{d.libelle}</span></div><div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Badge label={d.categorie} color={catC(d.categorie)} small/><span style={{fontSize:10,color:C.muted}}>📅 {d.date}</span>{d.note&&<span style={{fontSize:10,color:C.muted}}>{d.note}</span>}</div></div>
-              <div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{fontWeight:800,color:C.orange,fontSize:14}}>{fmtS(d.montant)}</span><button onClick={()=>delDep(d.id)} style={{background:C.red+"22",border:"1px solid "+C.red+"44",color:C.red,borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>🗑️</button></div>
-            </div>
-          ))}
-          {filteredDep.length>0&&<div style={{background:C.card,border:"1px solid "+C.orange+"44",borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between"}}><span style={{fontWeight:700,color:C.muted}}>Total</span><span style={{fontWeight:800,color:C.orange}}>{fmt(filteredDep.reduce((a,d)=>a+Number(d.montant),0))}</span></div>}
+          {filteredDep.length===0&&<EmptyState msg="Aucune depense" icon="🧾"/>}
+          {filteredDep.map(function(d){
+            return (
+              <div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{d.libelle}</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}><Badge label={d.categorie} color={catC(d.categorie,T)} small/><span style={{fontSize:10,color:T.muted}}>{d.date}</span></div></div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{fontWeight:800,color:T.primary,fontSize:14}}>{fmtS(d.montant)}</span><button onClick={function(){ delDep(d.id); }} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>X</button></div>
+              </div>
+            );
+          })}
           {showNewDep&&(
-            <Modal title="🧾 Nouvelle Dépense" onClose={()=>setShowNewDep(false)} onSave={addDep}>
-              {saving?<Spinner/>:<FGrid cols={2}>
-                <FField label="Libellé *" value={depForm.libelle} onChange={v=>setDepForm(p=>({...p,libelle:v}))} full/>
-                <FSelect label="Catégorie" value={depForm.categorie} onChange={v=>setDepForm(p=>({...p,categorie:v}))} options={CATS}/>
-                <FField label="Montant (XOF) *" type="number" value={depForm.montant} onChange={v=>setDepForm(p=>({...p,montant:v}))}/>
-                <FField label="Date" type="date" value={depForm.date} onChange={v=>setDepForm(p=>({...p,date:v}))} full/>
-                <FField label="Note" value={depForm.note} onChange={v=>setDepForm(p=>({...p,note:v}))} full/>
-              </FGrid>}
+            <Modal title="Nouvelle Depense" onClose={function(){ setShowNewDep(false); }} onSave={addDep} T={T}>
+              {saving?<Spinner/>:(
+                <FGrid cols={2}>
+                  <FField label="Libelle *" value={depForm.libelle} onChange={function(v){ setDepForm(function(p){ return Object.assign({},p,{libelle:v}); }); }} full T={T}/>
+                  <FSelect label="Categorie" value={depForm.categorie} onChange={function(v){ setDepForm(function(p){ return Object.assign({},p,{categorie:v}); }); }} options={CATS} T={T}/>
+                  <FField label="Montant" type="number" value={depForm.montant} onChange={function(v){ setDepForm(function(p){ return Object.assign({},p,{montant:v}); }); }} T={T}/>
+                  <FField label="Date" type="date" value={depForm.date} onChange={function(v){ setDepForm(function(p){ return Object.assign({},p,{date:v}); }); }} T={T}/>
+                  <FField label="Note" value={depForm.note} onChange={function(v){ setDepForm(function(p){ return Object.assign({},p,{note:v}); }); }} full T={T}/>
+                </FGrid>
+              )}
             </Modal>
           )}
         </div>
@@ -1026,195 +597,400 @@ function FichePage({chantier:c,onglet,setOnglet,setPage,chantiers,reload}){
   );
 }
 
-function InterventionsPage({interventions,chantiers,reload}){
-  const {isMobile}=useBP();
-  const [filterT,setFilterT]=useState("Tous");
-  const [filterS,setFilterS]=useState("Tous");
-  const [showNew,setShowNew]=useState(false);
-  const [viewId,setViewId]=useState(null);
-  const [saving,setSaving]=useState(false);
-  const [form,setForm]=useState({titre:"",description:"",type:"Corrective",intervenant:"",chantier:"",client:"",dateCreation:today(),duree:"",statut:"En attente"});
-  const types=["Tous","Urgence","Préventive","Corrective","Inspection"];
-  const statuts=["Tous","En attente","En cours","Terminée"];
-  const STIC={"En attente":C.yellow,"En cours":C.blue,"Terminée":C.green};
-  const totalIntDep=i=>(i.depenses||[]).reduce((a,d)=>a+Number(d.montant),0);
-  const filtered=interventions.filter(i=>(filterT==="Tous"||i.type===filterT)&&(filterS==="Tous"||i.statut===filterS));
-  const updateSt=async(id,s)=>{await sb.from("interventions").eq("id",id).update({statut:s});reload();};
-  const delInt=async id=>{await sb.from("interventions").eq("id",id).del();reload();};
-  const saveNew=async()=>{
-    if(!form.titre)return;setSaving(true);
-    await sb.from("interventions").insert({titre:form.titre,description:form.description,type:form.type,intervenant:form.intervenant,chantier:form.chantier,client:form.client,date_creation:form.dateCreation,duree:parseInt(form.duree)||1,statut:form.statut,facturee:false});
-    setSaving(false);setShowNew(false);reload();
-  };
-  return(
+// ═════════════════════════════════════════════════════════════════════════════
+// DEVIS
+// ═════════════════════════════════════════════════════════════════════════════
+function DevisPage({devis,setDevis,chantiers,T}){
+  const {isMobile} = useBP();
+  const [showForm,setShowForm] = useState(false);
+  const [editDevis,setEditDevis] = useState(null);
+  const [filterSt,setFilterSt] = useState("Tous");
+  var statuts = ["Tous","brouillon","envoye","accepte","refuse"];
+  var filtered = filterSt==="Tous"?devis:devis.filter(function(d){ return d.statut===filterSt; });
+  var SDC = {brouillon:T.muted,envoye:T.secondary,accepte:T.success,refuse:T.danger};
+  var totalCA = devis.filter(function(d){ return d.statut==="accepte"; }).reduce(function(a,d){ return a+d.total_ttc; },0);
+  var txConv = devis.length>0?Math.round(devis.filter(function(d){ return d.statut==="accepte"; }).length/devis.length*100):0;
+
+  function handleSave(d){ setDevis(function(p){ return editDevis?p.map(function(x){ return x.id===d.id?d:x; }):[d].concat(p); }); setShowForm(false); setEditDevis(null); }
+  function handleDel(id){ setDevis(function(p){ return p.filter(function(d){ return d.id!==id; }); }); }
+  function handleSt(id,s){ setDevis(function(p){ return p.map(function(d){ return d.id===id?Object.assign({},d,{statut:s}):d; }); }); }
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+        <KpiCard icon="📄" label="Total" value={devis.length} color={T.primary} compact={isMobile} T={T}/>
+        <KpiCard icon="✅" label="Acceptes" value={devis.filter(function(d){ return d.statut==="accepte"; }).length} color={T.success} compact={isMobile} T={T}/>
+        <KpiCard icon="💰" label="CA accepte" value={fmtS(totalCA)} color={T.success} compact={isMobile} T={T}/>
+        <KpiCard icon="📊" label="Taux conv." value={txConv+"%"} color={txConv>50?T.success:txConv>25?T.warning:T.danger} compact={isMobile} T={T}/>
+      </div>
+      <div style={{display:"flex",gap:6,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:4,overflowX:"auto"}}>
+          {statuts.map(function(s){ return <button key={s} onClick={function(){ setFilterSt(s); }} style={{padding:"5px 12px",borderRadius:20,border:"1px solid "+(filterSt===s?T.primary:T.border),background:filterSt===s?T.primary:"transparent",color:filterSt===s?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>; })}
+        </div>
+        <button onClick={function(){ setEditDevis(null); setShowForm(true); }} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Nouveau devis</button>
+      </div>
+      {filtered.length===0&&<EmptyState msg="Aucun devis" icon="📄"/>}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(360px,1fr))",gap:14}}>
+        {filtered.map(function(d){
+          var ch = chantiers.find(function(c){ return c.id===d.chantier_id; });
+          return (
+            <div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:18,display:"flex",flexDirection:"column",gap:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                <div><div style={{fontWeight:800,fontSize:15,color:T.primary}}>{d.numero}</div><div style={{fontWeight:600,fontSize:14,marginTop:2}}>{d.client_nom}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{d.date_creation} - validite : {d.date_validite}</div>{ch&&<div style={{fontSize:11,color:T.muted}}>🏗 {ch.nom}</div>}</div>
+                <Badge label={d.statut} color={SDC[d.statut]||T.muted}/>
+              </div>
+              <div style={{background:T.mid,borderRadius:8,padding:"10px 14px"}}>
+                <div style={{fontSize:10,color:T.muted}}>TOTAL TTC</div>
+                <div style={{fontWeight:800,fontSize:18,color:T.primary}}>{fmt(d.total_ttc)}</div>
+                <div style={{fontSize:10,color:T.muted}}>HT : {fmt(d.sous_total)} - TVA {d.taux_tva}%</div>
+              </div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {["brouillon","envoye","accepte","refuse"].map(function(s){ return <button key={s} onClick={function(){ handleSt(d.id,s); }} style={{padding:"4px 10px",borderRadius:20,border:"1px solid "+(d.statut===s?(SDC[s]||T.primary):T.border),background:d.statut===s?(SDC[s]||T.primary)+"22":"transparent",color:d.statut===s?(SDC[s]||T.primary):T.muted,cursor:"pointer",fontSize:10}}>{s}</button>; })}
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={function(){ exportPDF(d,calcDevis(d.lots||[],d.taux_tva||18,d.taux_remise||0),ch&&ch.nom,T); }} style={{flex:1,background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"7px",fontSize:12,cursor:"pointer",fontWeight:600}}>PDF</button>
+                <button onClick={function(){ setEditDevis(d); setShowForm(true); }} style={{background:T.warning+"22",color:T.warning,border:"1px solid "+T.warning+"44",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>Editer</button>
+                <button onClick={function(){ if(window.confirm("Supprimer ?")) handleDel(d.id); }} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"7px 10px",fontSize:12,cursor:"pointer"}}>X</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {showForm&&<DevisForm chantiers={chantiers} editDevis={editDevis} onSave={handleSave} onClose={function(){ setShowForm(false); setEditDevis(null); }} T={T}/>}
+    </div>
+  );
+}
+
+function DevisForm({chantiers,editDevis,onSave,onClose,T}){
+  const {isMobile} = useBP();
+  function newArt(){ return {id:Date.now()+Math.random(),designation:"",quantite:1,unite:"U",prix_unitaire:0}; }
+  function newLot(){ return {id:Date.now()+Math.random(),type:"lot",nom:"",articles:[newArt()],sousLots:[]}; }
+
+  var initLots = editDevis&&editDevis.lots ? editDevis.lots : [Object.assign(newLot(),{nom:"Lot 1 - Gros oeuvre"})];
+  var initForm = editDevis ? editDevis : {id:Date.now(),numero:genNumero(),statut:"brouillon",client_nom:"",client_adresse:"",client_telephone:"",client_email:"",chantier_id:"",date_creation:today(),date_validite:addDays(today(),30),taux_tva:18,taux_remise:0,conditions_paiement:"30% a la commande, 40% a mi-chantier, 30% a reception.",notes:"",lots:initLots};
+
+  const [form,setForm] = useState(initForm);
+  function up(k,v){ setForm(function(p){ return Object.assign({},p,{[k]:v}); }); }
+  function upLots(fn){ setForm(function(p){ return Object.assign({},p,{lots:fn(p.lots)}); }); }
+
+  function addLot(){ upLots(function(ls){ return ls.concat([Object.assign(newLot(),{nom:"Lot "+(ls.filter(function(l){ return l.type==="lot"; }).length+1)})]); }); }
+  function addArticleLibre(){ upLots(function(ls){ return ls.concat([Object.assign({id:Date.now(),type:"article"},newArt())]); }); }
+  function delLot(id){ upLots(function(ls){ return ls.filter(function(l){ return l.id!==id; }); }); }
+  function upLot(id,k,v){ upLots(function(ls){ return ls.map(function(l){ return l.id===id?Object.assign({},l,{[k]:v}):l; }); }); }
+  function addArtToLot(lotId){ upLots(function(ls){ return ls.map(function(l){ return l.id===lotId?Object.assign({},l,{articles:(l.articles||[]).concat([newArt()])}):l; }); }); }
+  function delArtFromLot(lotId,artId){ upLots(function(ls){ return ls.map(function(l){ return l.id===lotId?Object.assign({},l,{articles:(l.articles||[]).filter(function(a){ return a.id!==artId; })}):l; }); }); }
+  function upArtInLot(lotId,artId,k,v){ upLots(function(ls){ return ls.map(function(l){ return l.id===lotId?Object.assign({},l,{articles:(l.articles||[]).map(function(a){ return a.id===artId?Object.assign({},a,{[k]:v}):a; })}):l; }); }); }
+  function upArtLibre(id,k,v){ upLots(function(ls){ return ls.map(function(l){ return l.id===id&&l.type==="article"?Object.assign({},l,{[k]:v}):l; }); }); }
+
+  var calc = calcDevis(form.lots,form.taux_tva,form.taux_remise);
+
+  function handleSave(){
+    if(!form.client_nom){ alert("Nom du client requis."); return; }
+    onSave(Object.assign({},form,{lots:calc.lots,sous_total:calc.sousTotal,montant_tva:calc.montantTVA,montant_remise:calc.montantRemise,total_ttc:calc.totalTTC}));
+  }
+
+  function ArtRow({a,onUp,onDel}){
+    var tl = Math.round((a.quantite||0)*(a.prix_unitaire||0));
+    return (
+      <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:6,flexWrap:isMobile?"wrap":"nowrap"}}>
+        <input value={a.designation} onChange={function(e){ onUp("designation",e.target.value); }} placeholder="Designation..." style={{flex:2,background:T.bg,border:"1px solid "+T.border,borderRadius:7,padding:"7px 10px",color:T.white,fontSize:13,outline:"none",minWidth:isMobile?"100%":0}}/>
+        <input type="number" value={a.quantite} onChange={function(e){ onUp("quantite",parseFloat(e.target.value)||0); }} style={{width:70,background:T.bg,border:"1px solid "+T.border,borderRadius:7,padding:"7px 8px",color:T.white,fontSize:13,outline:"none",textAlign:"center"}}/>
+        <select value={a.unite} onChange={function(e){ onUp("unite",e.target.value); }} style={{width:75,background:T.bg,border:"1px solid "+T.border,borderRadius:7,padding:"7px 6px",color:T.white,fontSize:12,outline:"none"}}>
+          {UNITES.map(function(u){ return <option key={u} value={u}>{u}</option>; })}
+        </select>
+        <input type="number" value={a.prix_unitaire} onChange={function(e){ onUp("prix_unitaire",parseFloat(e.target.value)||0); }} style={{width:100,background:T.bg,border:"1px solid "+T.border,borderRadius:7,padding:"7px 8px",color:T.white,fontSize:13,outline:"none",textAlign:"right"}}/>
+        <div style={{width:100,textAlign:"right",fontWeight:700,color:T.primary,fontSize:12}}>{fmtS(tl)}</div>
+        <button onClick={onDel} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:6,padding:"6px 8px",cursor:"pointer"}}>X</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:860,maxHeight:"96vh",overflow:"auto",padding:"24px 20px"}}>
+        <div style={{width:40,height:4,background:T.border,borderRadius:99,margin:"0 auto 20px"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div><div style={{fontWeight:800,fontSize:18}}>{editDevis?"Modifier":"Nouveau"} Devis</div><div style={{fontSize:12,color:T.primary,fontWeight:700,marginTop:2}}>{form.numero}</div></div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,fontSize:22,cursor:"pointer"}}>x</button>
+        </div>
+
+        <div style={{fontWeight:700,fontSize:13,color:T.primary,margin:"0 0 10px",borderBottom:"1px solid "+T.border,paddingBottom:6}}>Client</div>
+        <FGrid cols={isMobile?1:2}>
+          <FField label="Nom client *" value={form.client_nom} onChange={function(v){ up("client_nom",v); }} full={isMobile} T={T}/>
+          <FSelect label="Chantier" value={form.chantier_id} onChange={function(v){ up("chantier_id",v); }} options={[["","- Aucun -"]].concat(chantiers.map(function(c){ return [c.id,c.nom]; }))} T={T}/>
+          <FField label="Adresse" value={form.client_adresse} onChange={function(v){ up("client_adresse",v); }} T={T}/>
+          <FField label="Telephone" value={form.client_telephone} onChange={function(v){ up("client_telephone",v); }} T={T}/>
+          <FField label="Email" value={form.client_email} onChange={function(v){ up("client_email",v); }} type="email" T={T}/>
+          <FField label="Validite" value={form.date_validite} onChange={function(v){ up("date_validite",v); }} type="date" T={T}/>
+        </FGrid>
+
+        <div style={{fontWeight:700,fontSize:13,color:T.primary,margin:"16px 0 10px",borderBottom:"1px solid "+T.border,paddingBottom:6}}>Lots et Articles</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {form.lots.map(function(l,li){
+            if(l.type==="article"){
+              return (
+                <div key={l.id} style={{background:T.mid,borderRadius:8,padding:"10px 12px"}}>
+                  <ArtRow a={l} onUp={function(k,v){ upArtLibre(l.id,k,v); }} onDel={function(){ delLot(l.id); }}/>
+                </div>
+              );
+            }
+            var lotCalc = calc.lots.find(function(x){ return x.id===l.id; });
+            var lotTotal = lotCalc ? lotCalc.total : 0;
+            return (
+              <div key={l.id} style={{background:T.mid,border:"2px solid "+T.primary+"44",borderRadius:10,overflow:"hidden"}}>
+                <div style={{background:T.primary+"22",padding:"10px 14px",display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <span style={{background:T.primary,color:"#fff",borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:800}}>LOT {li+1}</span>
+                  <input value={l.nom} onChange={function(e){ upLot(l.id,"nom",e.target.value); }} placeholder="Nom du lot..." style={{flex:1,background:"transparent",border:"none",borderBottom:"1px dashed "+T.primary+"66",color:T.white,fontSize:14,fontWeight:700,outline:"none",padding:"2px 0",minWidth:120}}/>
+                  <div style={{fontWeight:800,color:T.primary,fontSize:14}}>{fmtS(lotTotal)}</div>
+                  <button onClick={function(){ delLot(l.id); }} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>X Lot</button>
+                </div>
+                <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:6}}>
+                  {(l.articles||[]).map(function(a){ return <ArtRow key={a.id} a={a} onUp={function(k,v){ upArtInLot(l.id,a.id,k,v); }} onDel={function(){ delArtFromLot(l.id,a.id); }}/>; })}
+                  <button onClick={function(){ addArtToLot(l.id); }} style={{background:T.primary+"11",border:"1px dashed "+T.primary+"55",color:T.primary,borderRadius:7,padding:"6px 12px",fontSize:11,cursor:"pointer",textAlign:"left",fontWeight:600}}>+ Article</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",gap:8,marginTop:10}}>
+          <button onClick={addLot} style={{flex:1,background:T.primary+"22",border:"2px dashed "+T.primary+"66",color:T.primary,borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer"}}>+ Lot</button>
+          <button onClick={addArticleLibre} style={{flex:1,background:T.mid,border:"2px dashed "+T.border,color:T.muted,borderRadius:10,padding:"10px",fontWeight:700,cursor:"pointer"}}>+ Article libre</button>
+        </div>
+
+        <div style={{fontWeight:700,fontSize:13,color:T.primary,margin:"16px 0 10px",borderBottom:"1px solid "+T.border,paddingBottom:6}}>Financier</div>
+        <FGrid cols={isMobile?1:3}>
+          <FField label="TVA (%)" type="number" value={form.taux_tva} onChange={function(v){ up("taux_tva",parseFloat(v)||0); }} T={T}/>
+          <FField label="Remise (%)" type="number" value={form.taux_remise} onChange={function(v){ up("taux_remise",parseFloat(v)||0); }} T={T}/>
+          <div style={{background:T.primary+"11",border:"1px solid "+T.primary+"44",borderRadius:8,padding:"10px 14px"}}>
+            <div style={{fontSize:10,color:T.muted}}>TOTAL TTC</div>
+            <div style={{fontWeight:800,fontSize:18,color:T.primary}}>{fmt(calc.totalTTC)}</div>
+          </div>
+        </FGrid>
+        <div style={{background:T.mid,borderRadius:10,padding:"12px 16px",marginTop:10}}>
+          {[["Sous-total HT",fmt(calc.sousTotal),T.white],["TVA",fmt(calc.montantTVA),T.muted]].map(function(row){
+            return <div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",fontSize:13,borderBottom:"1px solid "+T.border}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:600,color:row[2]}}>{row[1]}</span></div>;
+          })}
+          <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0",marginTop:4}}><span style={{fontWeight:700}}>TOTAL TTC</span><span style={{fontWeight:800,fontSize:16,color:T.primary}}>{fmt(calc.totalTTC)}</span></div>
+        </div>
+
+        <div style={{fontWeight:700,fontSize:13,color:T.primary,margin:"16px 0 10px",borderBottom:"1px solid "+T.border,paddingBottom:6}}>Conditions</div>
+        <FGrid cols={1}>
+          <FField label="Conditions de paiement" value={form.conditions_paiement} onChange={function(v){ up("conditions_paiement",v); }} rows={2} full T={T}/>
+          <FField label="Notes" value={form.notes} onChange={function(v){ up("notes",v); }} rows={2} full T={T}/>
+        </FGrid>
+
+        <div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end",flexWrap:"wrap"}}>
+          <button onClick={onClose} style={{padding:"10px 20px",background:T.mid,color:T.white,border:"none",borderRadius:10,cursor:"pointer"}}>Annuler</button>
+          <button onClick={handleSave} style={{padding:"10px 24px",background:T.primary,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer",fontSize:14}}>Enregistrer</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// INTERVENTIONS
+// ═════════════════════════════════════════════════════════════════════════════
+function InterventionsPage({interventions,chantiers,reload,T}){
+  const {isMobile} = useBP();
+  const [filterT,setFilterT] = useState("Tous");
+  const [filterS,setFilterS] = useState("Tous");
+  const [showNew,setShowNew] = useState(false);
+  const [saving,setSaving] = useState(false);
+  const [form,setForm] = useState({titre:"",description:"",type:"Corrective",intervenant:"",chantier:"",client:"",dateCreation:today(),duree:"",statut:"En attente"});
+  var types = ["Tous","Urgence","Preventive","Corrective","Inspection"];
+  var statuts = ["Tous","En attente","En cours","Terminee"];
+  var filtered = interventions.filter(function(i){ return (filterT==="Tous"||i.type===filterT)&&(filterS==="Tous"||i.statut===filterS); });
+  var STIC = {"En attente":T.warning,"En cours":T.secondary,"Terminee":T.success};
+  function totalIntDep(i){ return (i.depenses||[]).reduce(function(a,d){ return a+Number(d.montant); },0); }
+  function updateSt(id,s){ sb.from("interventions").eq("id",id).update({statut:s}).then(function(){ reload(); }); }
+  function delInt(id){ sb.from("interventions").eq("id",id).del().then(function(){ reload(); }); }
+  function saveNew(){
+    if(!form.titre) return;
+    setSaving(true);
+    sb.from("interventions").insert({titre:form.titre,description:form.description,type:form.type,intervenant:form.intervenant,chantier:form.chantier,client:form.client,date_creation:form.dateCreation,duree:parseInt(form.duree)||1,statut:form.statut,facturee:false}).then(function(){
+      setSaving(false); setShowNew(false); reload();
+    });
+  }
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
-        <KpiCard icon="🔧" label="Total" value={interventions.length} color={C.orange} compact={isMobile}/>
-        <KpiCard icon="🚨" label="Urgences" value={interventions.filter(i=>i.type==="Urgence").length} color={C.red} compact={isMobile}/>
-        <KpiCard icon="⚙️" label="En cours" value={interventions.filter(i=>i.statut==="En cours").length} color={C.blue} compact={isMobile}/>
-        <KpiCard icon="💰" label="Coût" value={fmtS(interventions.reduce((a,i)=>a+totalIntDep(i),0))} color={C.yellow} compact={isMobile}/>
+        <KpiCard icon="🔧" label="Total" value={interventions.length} color={T.primary} compact={isMobile} T={T}/>
+        <KpiCard icon="🚨" label="Urgences" value={interventions.filter(function(i){ return i.type==="Urgence"; }).length} color={T.danger} compact={isMobile} T={T}/>
+        <KpiCard icon="⚙️" label="En cours" value={interventions.filter(function(i){ return i.statut==="En cours"; }).length} color={T.secondary} compact={isMobile} T={T}/>
+        <KpiCard icon="💰" label="Cout" value={fmtS(interventions.reduce(function(a,i){ return a+totalIntDep(i); },0))} color={T.warning} compact={isMobile} T={T}/>
       </div>
-      <div style={{background:C.card,border:"1px solid "+C.border,borderRadius:12,padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}}>
-        <div style={{display:"flex",gap:4,overflowX:"auto"}}>{types.map(t=><button key={t} onClick={()=>setFilterT(t)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filterT===t?C.orange:C.border),background:filterT===t?C.orange:"transparent",color:filterT===t?"#fff":C.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0,fontWeight:filterT===t?700:400}}>{t}</button>)}</div>
-        <div style={{display:"flex",gap:4,overflowX:"auto",justifyContent:"space-between"}}>
-          <div style={{display:"flex",gap:4}}>{statuts.map(s=><button key={s} onClick={()=>setFilterS(s)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filterS===s?C.orange:C.border),background:filterS===s?C.orange:"transparent",color:filterS===s?"#fff":C.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0,fontWeight:filterS===s?700:400}}>{s}</button>)}</div>
-          <button onClick={()=>setShowNew(true)} style={{background:C.orange,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12,flexShrink:0}}>+ Nouvelle</button>
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",gap:4,overflowX:"auto"}}>{types.map(function(t){ return <button key={t} onClick={function(){ setFilterT(t); }} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filterT===t?T.primary:T.border),background:filterT===t?T.primary:"transparent",color:filterT===t?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{t}</button>; })}</div>
+        <div style={{display:"flex",gap:4,justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",gap:4,overflowX:"auto"}}>{statuts.map(function(s){ return <button key={s} onClick={function(){ setFilterS(s); }} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filterS===s?T.primary:T.border),background:filterS===s?T.primary:"transparent",color:filterS===s?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>; })}</div>
+          <button onClick={function(){ setShowNew(true); }} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button>
         </div>
       </div>
       {filtered.length===0&&<EmptyState msg="Aucune intervention" icon="🔧"/>}
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
-        {filtered.map(i=>(
-          <div key={i.id} style={{background:C.card,border:"1px solid "+(i.type==="Urgence"?C.red+"66":C.border),borderRadius:14,padding:16,display:"flex",flexDirection:"column",gap:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-              <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{i.titre}</div><div style={{fontSize:11,color:C.muted}}>🏗️ {i.chantier||"—"} · 👤 {i.client||"—"}</div><div style={{fontSize:10,color:C.muted}}>📅 {i.dateCreation}</div></div>
-              <Badge label={i.type} color={{Urgence:C.red,Préventive:C.blue,Corrective:C.orange,Inspection:C.purple}[i.type]||C.orange} small/>
+        {filtered.map(function(i){
+          return (
+            <div key={i.id} style={{background:T.card,border:"1px solid "+(i.type==="Urgence"?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:16,display:"flex",flexDirection:"column",gap:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+                <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{i.titre}</div><div style={{fontSize:11,color:T.muted}}>{i.chantier||"-"} - {i.dateCreation}</div></div>
+                <Badge label={i.type} color={{Urgence:T.danger,Preventive:T.secondary,Corrective:T.primary,Inspection:"#A855F7"}[i.type]||T.primary} small/>
+              </div>
+              {i.description&&<div style={{fontSize:12,color:T.muted,background:T.mid,borderRadius:6,padding:"7px 10px"}}>{i.description}</div>}
+              <div style={{background:T.mid,borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div><div style={{fontSize:10,color:T.muted}}>Cout</div><div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmtS(totalIntDep(i))}</div></div>
+                <Badge label={i.facturee?"Facturee":"Non facturee"} color={i.facturee?T.success:T.danger} small/>
+              </div>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <select value={i.statut} onChange={function(e){ updateSt(i.id,e.target.value); }} style={{flex:1,background:(STIC[i.statut]||T.muted)+"22",border:"1px solid "+(STIC[i.statut]||T.muted)+"55",borderRadius:6,padding:"5px 10px",color:STIC[i.statut]||T.muted,fontSize:12,cursor:"pointer",outline:"none",fontWeight:700}}>
+                  {["En attente","En cours","Terminee"].map(function(s){ return <option key={s} value={s}>{s}</option>; })}
+                </select>
+                <button onClick={function(){ delInt(i.id); }} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>X</button>
+              </div>
             </div>
-            {i.description&&<div style={{fontSize:12,color:C.muted,background:C.mid,borderRadius:6,padding:"7px 10px"}}>{i.description}</div>}
-            <div style={{background:C.mid,borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div><div style={{fontSize:10,color:C.muted}}>Coût</div><div style={{fontWeight:800,color:C.orange,fontSize:15}}>{fmtS(totalIntDep(i))}</div></div>
-              <Badge label={i.facturee?"✅ Facturée":"❌ Non facturée"} color={i.facturee?C.green:C.red} small/>
-            </div>
-            <div style={{display:"flex",gap:6,alignItems:"center"}}>
-              <select value={i.statut} onChange={e=>updateSt(i.id,e.target.value)} style={{flex:1,background:(STIC[i.statut]||C.muted)+"22",border:"1px solid "+(STIC[i.statut]||C.muted)+"55",borderRadius:6,padding:"5px 10px",color:STIC[i.statut]||C.muted,fontSize:12,cursor:"pointer",outline:"none",fontWeight:700,WebkitAppearance:"none"}}>
-                {["En attente","En cours","Terminée"].map(s=><option key={s} value={s}>{s}</option>)}
-              </select>
-              <button onClick={()=>delInt(i.id)} style={{background:C.red+"22",border:"1px solid "+C.red+"44",color:C.red,borderRadius:6,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>🗑️</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      {showNew&&<Modal title="🔧 Nouvelle Intervention" onClose={()=>setShowNew(false)} onSave={saveNew}>
-        {saving?<Spinner/>:<FGrid cols={2}>
-          <FField label="Titre *" value={form.titre} onChange={v=>setForm(p=>({...p,titre:v}))} full/>
-          <FSelect label="Type" value={form.type} onChange={v=>setForm(p=>({...p,type:v}))} options={["Urgence","Préventive","Corrective","Inspection"]}/>
-          <FSelect label="Statut" value={form.statut} onChange={v=>setForm(p=>({...p,statut:v}))} options={["En attente","En cours","Terminée"]}/>
-          <FField label="Intervenant" value={form.intervenant} onChange={v=>setForm(p=>({...p,intervenant:v}))}/>
-          <FSelect label="Chantier" value={form.chantier} onChange={v=>setForm(p=>({...p,chantier:v}))} options={["",...chantiers.map(c=>c.nom)]}/>
-          <FField label="Client" value={form.client} onChange={v=>setForm(p=>({...p,client:v}))}/>
-          <FField label="Date" type="date" value={form.dateCreation} onChange={v=>setForm(p=>({...p,dateCreation:v}))}/>
-          <FField label="Durée (j)" type="number" value={form.duree} onChange={v=>setForm(p=>({...p,duree:v}))}/>
-          <div style={{gridColumn:"1/-1"}}><label style={{fontSize:11,color:C.muted,display:"block",marginBottom:4}}>Description</label><textarea value={form.description} onChange={e=>setForm(p=>({...p,description:e.target.value}))} rows={3} style={{width:"100%",background:C.mid,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.white,fontSize:14,boxSizing:"border-box",outline:"none",resize:"vertical"}}/></div>
-        </FGrid>}
-      </Modal>}
+      {showNew&&(
+        <Modal title="Nouvelle Intervention" onClose={function(){ setShowNew(false); }} onSave={saveNew} T={T}>
+          {saving?<Spinner/>:(
+            <FGrid cols={2}>
+              <FField label="Titre *" value={form.titre} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{titre:v}); }); }} full T={T}/>
+              <FSelect label="Type" value={form.type} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{type:v}); }); }} options={["Urgence","Preventive","Corrective","Inspection"]} T={T}/>
+              <FSelect label="Statut" value={form.statut} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{statut:v}); }); }} options={["En attente","En cours","Terminee"]} T={T}/>
+              <FField label="Intervenant" value={form.intervenant} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{intervenant:v}); }); }} T={T}/>
+              <FSelect label="Chantier" value={form.chantier} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{chantier:v}); }); }} options={[""].concat(chantiers.map(function(c){ return c.nom; }))} T={T}/>
+              <FField label="Date" type="date" value={form.dateCreation} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{dateCreation:v}); }); }} T={T}/>
+              <FField label="Description" value={form.description} onChange={function(v){ setForm(function(p){ return Object.assign({},p,{description:v}); }); }} rows={3} full T={T}/>
+            </FGrid>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
 
-function AlertesPage({chantiers,openCh}){
-  const alertes=genAlertes(chantiers);
-  const col={critique:C.red,warning:C.yellow,info:C.blue};
-  return(
+// ═════════════════════════════════════════════════════════════════════════════
+// ALERTES
+// ═════════════════════════════════════════════════════════════════════════════
+function AlertesPage({chantiers,openCh,T}){
+  var alertes = genAlertes(chantiers,T);
+  var col = {critique:T.danger,warning:T.warning,info:T.secondary};
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:10}}>
-      {alertes.length===0&&<EmptyState msg="Aucune alerte 🎉" icon="✅"/>}
-      {alertes.map(({niveau,msg,chantier},i)=>(
-        <div key={i} onClick={()=>openCh(chantier.id)} style={{background:C.card,border:"1px solid "+(col[niveau]||C.border)+"55",borderRadius:10,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
-          <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13,color:col[niveau]}}>⚠️ {msg}</div><div style={{fontSize:11,color:C.muted,marginTop:3}}>{chantier.nom} · {chantier.client}</div></div>
-          <Badge label={chantier.statut} color={stC(chantier.statut)}/>
-        </div>
-      ))}
+      {alertes.length===0&&<EmptyState msg="Aucune alerte" icon="✅"/>}
+      {alertes.map(function(al,i){
+        return (
+          <div key={i} onClick={function(){ openCh(al.chantier.id); }} style={{background:T.card,border:"1px solid "+(col[al.niveau]||T.border)+"55",borderRadius:T.borderRadius,padding:"14px 16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+            <div><div style={{fontWeight:600,fontSize:13,color:col[al.niveau]}}>⚠ {al.msg}</div><div style={{fontSize:11,color:T.muted,marginTop:3}}>{al.chantier.nom} - {al.chantier.client}</div></div>
+            <Badge label={al.chantier.statut} color={stC(al.chantier.statut,T)}/>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function KpiPage({chantiers}){
-  const {isMobile}=useBP();
-  const totalB=chantiers.reduce((a,c)=>a+c.budgetInitial,0);
-  const totalD=chantiers.reduce((a,c)=>a+totalDep(c),0);
-  const marge=totalB-totalD;
-  const pc=pct(totalD,totalB);
-  const derives=chantiers.filter(c=>totalDep(c)>c.budgetInitial||c.statut==="En dérive");
-  const clos=chantiers.filter(c=>c.statut==="Clôturé");
-  const allDep=chantiers.flatMap(c=>c.depenses);
-  const depCat=CATS.map(cat=>({cat,total:allDep.filter(d=>d.categorie===cat).reduce((a,d)=>a+Number(d.montant),0)})).filter(x=>x.total>0);
-  return(
+// ═════════════════════════════════════════════════════════════════════════════
+// KPI
+// ═════════════════════════════════════════════════════════════════════════════
+function KpiPage({chantiers,T}){
+  const {isMobile} = useBP();
+  var totalB = chantiers.reduce(function(a,c){ return a+c.budgetInitial; },0);
+  var totalD = chantiers.reduce(function(a,c){ return a+totalDep(c); },0);
+  var marge = totalB-totalD;
+  var pc = pct(totalD,totalB);
+  var allDep = chantiers.reduce(function(a,c){ return a.concat(c.depenses); },[]);
+  var depCat = CATS.map(function(cat){ return {cat:cat,total:allDep.filter(function(d){ return d.categorie===cat; }).reduce(function(a,d){ return a+Number(d.montant); },0)}; }).filter(function(x){ return x.total>0; });
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(5,1fr)",gap:10}}>
-        <KpiCard icon="💰" label="Budget" value={fmtS(totalB)} compact={isMobile}/>
-        <KpiCard icon="🧾" label="Dépenses" value={fmtS(totalD)} color={C.yellow} compact={isMobile}/>
-        <KpiCard icon="💵" label="Marge" value={fmtS(marge)} color={marge>=0?C.green:C.red} compact={isMobile}/>
-        <KpiCard icon="📉" label="Dérives" value={derives.length} color={derives.length>0?C.red:C.green} compact={isMobile}/>
-        <KpiCard icon="🏁" label="Clôturés" value={clos.length} color={C.green} compact={isMobile}/>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+        <KpiCard icon="💰" label="Budget" value={fmtS(totalB)} compact={isMobile} T={T}/>
+        <KpiCard icon="🧾" label="Depenses" value={fmtS(totalD)} color={T.warning} compact={isMobile} T={T}/>
+        <KpiCard icon="💵" label="Marge" value={fmtS(marge)} color={marge>=0?T.success:T.danger} compact={isMobile} T={T}/>
+        <KpiCard icon="📉" label="Consomme" value={pc+"%"} color={pc>100?T.danger:pc>80?T.warning:T.success} compact={isMobile} T={T}/>
       </div>
-      <Card title="Consommation globale">
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:C.muted}}>Consommé</span><strong style={{color:pc>100?C.red:pc>80?C.yellow:C.green}}>{pc}%</strong></div>
-        <PBar p={pc} color={pc>100?C.red:pc>80?C.yellow:C.green} h={18}/>
+      <Card title="Depenses par categorie" T={T}>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={depCat} layout="vertical" margin={{left:5,right:5}}>
+            <XAxis type="number" tick={{fill:T.muted,fontSize:9}} tickFormatter={function(v){ return Math.round(v/1000)+"k"; }}/>
+            <YAxis type="category" dataKey="cat" tick={{fill:T.muted,fontSize:10}} width={80}/>
+            <Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}} formatter={function(v){ return fmtS(v); }}/>
+            <Bar dataKey="total" radius={[0,4,4,0]}>
+              {depCat.map(function(d,i){ return <Cell key={i} fill={catC(d.cat,T)}/>; })}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
       </Card>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16}}>
-        <Card title="Dépenses par catégorie">
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={depCat} layout="vertical" margin={{left:5,right:5}}>
-              <XAxis type="number" tick={{fill:C.muted,fontSize:9}} tickFormatter={v=>Math.round(v/1000)+"k"}/>
-              <YAxis type="category" dataKey="cat" tick={{fill:C.muted,fontSize:10}} width={80}/>
-              <Tooltip contentStyle={{background:C.dark,border:"1px solid "+C.border,color:C.white}} formatter={v=>fmtS(v)}/>
-              <Bar dataKey="total" radius={[0,4,4,0]}>{depCat.map(({cat},i)=><Cell key={i} fill={catC(cat)}/>)}</Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-        <Card title="Détail par chantier">
-          {chantiers.map(c=>{const d=totalDep(c),p=pct(d,c.budgetInitial);return(
-            <div key={c.id} style={{padding:"8px 0",borderBottom:"1px solid "+C.border}}>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{fontWeight:600}}>{c.nom.split(" ").slice(0,2).join(" ")}</span><span style={{fontWeight:700,color:p>100?C.red:p>80?C.yellow:C.green}}>{p}%</span></div>
-              <PBar p={p} color={p>100?C.red:p>80?C.yellow:C.green} h={6}/>
+      <Card title="Par chantier" T={T}>
+        {chantiers.map(function(c){
+          var d=totalDep(c), p=pct(d,c.budgetInitial);
+          return (
+            <div key={c.id} style={{padding:"8px 0",borderBottom:"1px solid "+T.border}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{fontWeight:600}}>{c.nom}</span><span style={{fontWeight:700,color:p>100?T.danger:p>80?T.warning:T.success}}>{p}%</span></div>
+              <PBar p={p} color={p>100?T.danger:p>80?T.warning:T.success} h={6}/>
             </div>
-          );})}
-          {chantiers.length===0&&<EmptyState msg="Aucun chantier" icon="📊"/>}
-        </Card>
-      </div>
+          );
+        })}
+        {chantiers.length===0&&<EmptyState msg="Aucun chantier" icon="📊"/>}
+      </Card>
     </div>
   );
 }
 
-function IAPage({chantiers,openCh,interventions}){
-  const {isMobile}=useBP();
-  const [analysing,setAnalysing]=useState(false);
-  const [iaResult,setIaResult]=useState(null);
-  const [iaError,setIaError]=useState(null);
-  const derives=chantiers.filter(c=>c.statut==="En dérive");
-  const risques=chantiers.filter(c=>{const p=pct(totalDep(c),c.budgetInitial);return p>=80&&p<=100&&c.statut!=="En dérive";});
+// ═════════════════════════════════════════════════════════════════════════════
+// IA
+// ═════════════════════════════════════════════════════════════════════════════
+function IAPage({chantiers,openCh,interventions,T}){
+  const [analysing,setAnalysing] = useState(false);
+  const [iaResult,setIaResult] = useState(null);
+  const [iaError,setIaError] = useState(null);
 
-  const runIA=async()=>{
-    setAnalysing(true);setIaError(null);setIaResult(null);
-    try{
-      const ctx={chantiers:chantiers.map(c=>({nom:c.nom,client:c.client,statut:c.statut,budgetInitial:c.budgetInitial,depensesTotal:totalDep(c)})),interventions:interventions.map(i=>({titre:i.titre,type:i.type,statut:i.statut}))};
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:"Expert BTP. Analyse ce portefeuille (XOF). Réponds UNIQUEMENT en JSON:\n"+JSON.stringify(ctx)+"\n\nFormat: {\"recommandations\":[{\"titre\":string,\"detail\":string,\"priorite\":\"haute\"|\"moyenne\"|\"basse\"}],\"scoreGlobal\":number,\"synthese\":string}"}]})});
-      const data=await res.json();const text=(data.content||[]).map(i=>i.text||"").join("");
+  function runIA(){
+    setAnalysing(true); setIaError(null); setIaResult(null);
+    var ctx = {
+      chantiers: chantiers.map(function(c){ return {nom:c.nom,client:c.client,statut:c.statut,budgetInitial:c.budgetInitial,depensesTotal:totalDep(c)}; }),
+      interventions: interventions.map(function(i){ return {titre:i.titre,type:i.type,statut:i.statut}; })
+    };
+    fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,messages:[{role:"user",content:"Expert BTP. Analyse ce portefeuille (XOF). Reponds UNIQUEMENT en JSON:\n"+JSON.stringify(ctx)+"\n\nFormat: {\"recommandations\":[{\"titre\":string,\"detail\":string,\"priorite\":\"haute\"|\"moyenne\"|\"basse\"}],\"scoreGlobal\":number,\"synthese\":string}"}]})})
+    .then(function(res){ return res.json(); })
+    .then(function(data){
+      var text = (data.content||[]).map(function(i){ return i.text||""; }).join("");
       setIaResult(JSON.parse(text.replace(/```json|```/g,"").trim()));
-    }catch(e){setIaError("Erreur IA : "+e.message);}
-    setAnalysing(false);
-  };
+      setAnalysing(false);
+    })
+    .catch(function(e){ setIaError("Erreur IA : "+e.message); setAnalysing(false); });
+  }
 
-  return(
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{background:C.orange+"11",border:"1px solid "+C.orange+"44",borderRadius:14,padding:18}}>
+      <div style={{background:T.primary+"11",border:"1px solid "+T.primary+"44",borderRadius:T.borderRadius,padding:18}}>
         <div style={{fontSize:18,fontWeight:800,marginBottom:4}}>🤖 Intelligence Artificielle</div>
-        <div style={{color:C.muted,fontSize:12,marginBottom:12}}>Analyse automatique du portefeuille</div>
-        <button onClick={runIA} disabled={analysing} style={{background:C.orange,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:analysing?"wait":"pointer",fontSize:14}}>{analysing?"⏳ Analyse...":"▶ Lancer l'analyse"}</button>
-        {iaError&&<div style={{color:C.red,fontSize:12,marginTop:10}}>{iaError}</div>}
+        <div style={{color:T.muted,fontSize:12,marginBottom:12}}>Analyse automatique du portefeuille</div>
+        <button onClick={runIA} disabled={analysing} style={{background:T.primary,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:analysing?"wait":"pointer",fontSize:14}}>{analysing?"Analyse...":"Lancer l'analyse"}</button>
+        {iaError&&<div style={{color:T.danger,fontSize:12,marginTop:10}}>{iaError}</div>}
       </div>
-      <Card title="🚨 Dérives budgétaires">
-        {derives.length===0&&risques.length===0?<div style={{color:C.green,padding:16,textAlign:"center"}}>✅ Aucune dérive</div>:<>
-          {derives.map(c=><div key={c.id} onClick={()=>openCh(c.id)} style={{background:C.red+"11",border:"1px solid "+C.red+"33",borderRadius:8,padding:"12px",marginBottom:8,cursor:"pointer"}}><div style={{fontWeight:700,color:C.red}}>🔴 {c.nom}</div><div style={{fontSize:12,color:C.muted}}>{pct(totalDep(c),c.budgetInitial)}% consommé</div></div>)}
-          {risques.map(c=><div key={c.id} onClick={()=>openCh(c.id)} style={{background:C.yellow+"11",border:"1px solid "+C.yellow+"33",borderRadius:8,padding:"12px",marginBottom:8,cursor:"pointer"}}><div style={{fontWeight:700,color:C.yellow}}>🟡 {c.nom}</div><div style={{fontSize:12,color:C.muted}}>{pct(totalDep(c),c.budgetInitial)}% — surveillance</div></div>)}
-        </>}
-      </Card>
-      {!iaResult&&!analysing&&<EmptyState msg="Lancez l'analyse IA pour des recommandations" icon="🤖"/>}
+      {!iaResult&&!analysing&&<EmptyState msg="Lancez l'analyse IA" icon="🤖"/>}
       {analysing&&<Spinner/>}
       {iaResult&&(
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
-          <div style={{background:C.orange+"11",border:"1px solid "+C.orange+"44",borderRadius:12,padding:16}}>
+          <div style={{background:T.primary+"11",border:"1px solid "+T.primary+"44",borderRadius:T.borderRadius,padding:16}}>
             <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-              <div style={{fontWeight:800,fontSize:15}}>📋 Synthèse</div>
-              <div style={{background:(iaResult.scoreGlobal>70?C.green:iaResult.scoreGlobal>40?C.yellow:C.red)+"22",borderRadius:8,padding:"4px 12px",fontWeight:800,color:iaResult.scoreGlobal>70?C.green:iaResult.scoreGlobal>40?C.yellow:C.red}}>Score : {iaResult.scoreGlobal}/100</div>
+              <div style={{fontWeight:800,fontSize:15}}>Synthese</div>
+              <div style={{background:(iaResult.scoreGlobal>70?T.success:iaResult.scoreGlobal>40?T.warning:T.danger)+"22",borderRadius:8,padding:"4px 12px",fontWeight:800,color:iaResult.scoreGlobal>70?T.success:iaResult.scoreGlobal>40?T.warning:T.danger}}>Score : {iaResult.scoreGlobal}/100</div>
             </div>
-            <div style={{fontSize:13,color:C.muted}}>{iaResult.synthese}</div>
+            <div style={{fontSize:13,color:T.muted}}>{iaResult.synthese}</div>
           </div>
-          <Card title="🎯 Recommandations">
-            {(iaResult.recommandations||[]).map((r,i)=>{const col=r.priorite==="haute"?C.red:r.priorite==="moyenne"?C.yellow:C.green;return(
-              <div key={i} style={{background:col+"11",border:"1px solid "+col+"33",borderRadius:8,padding:"12px",marginBottom:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{fontWeight:700,color:col,fontSize:13}}>{r.titre}</div><Badge label={"Priorité "+r.priorite} color={col} small/></div>
-                <div style={{fontSize:12,color:C.muted,marginTop:4}}>{r.detail}</div>
-              </div>
-            );})}
+          <Card title="Recommandations" T={T}>
+            {(iaResult.recommandations||[]).map(function(r,i){
+              var col = r.priorite==="haute"?T.danger:r.priorite==="moyenne"?T.warning:T.success;
+              return (
+                <div key={i} style={{background:col+"11",border:"1px solid "+col+"33",borderRadius:8,padding:"12px",marginBottom:10}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{fontWeight:700,color:col,fontSize:13}}>{r.titre}</div><Badge label={"Priorite "+r.priorite} color={col} small/></div>
+                  <div style={{fontSize:12,color:T.muted,marginTop:4}}>{r.detail}</div>
+                </div>
+              );
+            })}
           </Card>
         </div>
       )}
@@ -1222,36 +998,340 @@ function IAPage({chantiers,openCh,interventions}){
   );
 }
 
-function GestionPage({chantiers,openCh,reload}){
-  const {isMobile}=useBP();
-  const [confirmId,setConfirmId]=useState(null);
-  const [search,setSearch]=useState("");
-  const filtered=chantiers.filter(c=>c.nom.toLowerCase().includes(search.toLowerCase())||c.client.toLowerCase().includes(search.toLowerCase()));
-  const delCh=async id=>{await sb.from("chantiers").eq("id",id).del();setConfirmId(null);reload();};
-  return(
+// ═════════════════════════════════════════════════════════════════════════════
+// GESTION
+// ═════════════════════════════════════════════════════════════════════════════
+function GestionPage({chantiers,openCh,reload,T}){
+  const {isMobile} = useBP();
+  const [confirmId,setConfirmId] = useState(null);
+  const [search,setSearch] = useState("");
+  var filtered = chantiers.filter(function(c){ return c.nom.toLowerCase().includes(search.toLowerCase())||c.client.toLowerCase().includes(search.toLowerCase()); });
+  function delCh(id){ sb.from("chantiers").eq("id",id).del().then(function(){ setConfirmId(null); reload(); }); }
+  return (
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
-        <KpiCard icon="🏗️" label="Total" value={chantiers.length} color={C.orange} compact={isMobile}/>
-        <KpiCard icon="✅" label="Clôturés" value={chantiers.filter(c=>c.statut==="Clôturé").length} color={C.green} compact={isMobile}/>
-        <KpiCard icon="⚙️" label="En cours" value={chantiers.filter(c=>c.statut==="En cours").length} color={C.blue} compact={isMobile}/>
-        <KpiCard icon="🚨" label="Dérives" value={chantiers.filter(c=>c.statut==="En dérive").length} color={C.red} compact={isMobile}/>
+        <KpiCard icon="🏗️" label="Total" value={chantiers.length} color={T.primary} compact={isMobile} T={T}/>
+        <KpiCard icon="✅" label="Clotures" value={chantiers.filter(function(c){ return c.statut==="Cloture"; }).length} color={T.success} compact={isMobile} T={T}/>
+        <KpiCard icon="⚙️" label="En cours" value={chantiers.filter(function(c){ return c.statut==="En cours"; }).length} color={T.secondary} compact={isMobile} T={T}/>
+        <KpiCard icon="🚨" label="Derives" value={chantiers.filter(function(c){ return c.statut==="En derive"; }).length} color={T.danger} compact={isMobile} T={T}/>
       </div>
-      <Card title="⚙️ Gestion des projets">
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Rechercher..." style={{width:"100%",background:C.mid,border:"1px solid "+C.border,borderRadius:8,padding:"10px 14px",color:C.white,fontSize:14,boxSizing:"border-box",outline:"none",marginBottom:14}}/>
-        {filtered.map(c=>{const dep=totalDep(c),p=pct(dep,c.budgetInitial),s=ssb(dep,c.budgetInitial);return(
-          <div key={c.id} style={{background:C.mid,border:"1px solid "+(confirmId===c.id?C.red+"88":C.border),borderRadius:12,padding:"12px 14px",marginBottom:8}}>
-            {confirmId===c.id?(
-              <div><div style={{fontWeight:700,color:C.red,marginBottom:8}}>🗑️ Supprimer "{c.nom}" ?</div>
-              <div style={{display:"flex",gap:10}}><button onClick={()=>setConfirmId(null)} style={{flex:1,padding:"9px",background:C.card,color:C.white,border:"1px solid "+C.border,borderRadius:8,cursor:"pointer"}}>Annuler</button><button onClick={()=>delCh(c.id)} style={{flex:1,padding:"9px",background:C.red,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700}}>Supprimer</button></div></div>
-            ):(
-              <div><div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{c.nom}</div><div style={{fontSize:11,color:C.muted}}>👤 {c.client}</div></div><div style={{display:"flex",gap:4}}><Badge label={c.statut} color={stC(c.statut)} small/><Badge label={s} color={sbC(s)} small/></div></div>
-              <div style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted,marginBottom:3}}><span>{fmtS(dep)}</span><span style={{fontWeight:700,color:p>100?C.red:p>80?C.yellow:C.green}}>{p}%</span></div><PBar p={p} color={p>100?C.red:p>80?C.yellow:C.green} h={6}/></div>
-              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button onClick={()=>openCh(c.id)} style={{background:C.blue+"22",border:"1px solid "+C.blue+"44",color:C.blue,borderRadius:7,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:600}}>📋 Ouvrir</button><button onClick={()=>setConfirmId(c.id)} style={{background:C.red+"22",border:"1px solid "+C.red+"44",color:C.red,borderRadius:7,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:700}}>🗑️</button></div></div>
-            )}
-          </div>
-        );})}
+      <Card title="Projets" T={T}>
+        <input value={search} onChange={function(e){ setSearch(e.target.value); }} placeholder="Rechercher..." style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 14px",color:T.white,fontSize:14,boxSizing:"border-box",outline:"none",marginBottom:14}}/>
+        {filtered.map(function(c){
+          var dep=totalDep(c), p=pct(dep,c.budgetInitial);
+          return (
+            <div key={c.id} style={{background:T.mid,border:"1px solid "+(confirmId===c.id?T.danger+"88":T.border),borderRadius:T.borderRadius,padding:"12px 14px",marginBottom:8}}>
+              {confirmId===c.id?(
+                <div><div style={{fontWeight:700,color:T.danger,marginBottom:8}}>Supprimer "{c.nom}" ?</div>
+                <div style={{display:"flex",gap:10}}><button onClick={function(){ setConfirmId(null); }} style={{flex:1,padding:"9px",background:T.card,color:T.white,border:"1px solid "+T.border,borderRadius:8,cursor:"pointer"}}>Annuler</button><button onClick={function(){ delCh(c.id); }} style={{flex:1,padding:"9px",background:T.danger,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700}}>Supprimer</button></div></div>
+              ):(
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}><div><div style={{fontWeight:700,fontSize:14}}>{c.nom}</div><div style={{fontSize:11,color:T.muted}}>{c.client}</div></div><Badge label={c.statut} color={stC(c.statut,T)} small/></div>
+                  <div style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.muted,marginBottom:3}}><span>{fmtS(dep)}</span><span style={{fontWeight:700,color:p>100?T.danger:p>80?T.warning:T.success}}>{p}%</span></div><PBar p={p} color={p>100?T.danger:p>80?T.warning:T.success} h={6}/></div>
+                  <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button onClick={function(){ openCh(c.id); }} style={{background:T.secondary+"22",border:"1px solid "+T.secondary+"44",color:T.secondary,borderRadius:7,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:600}}>Ouvrir</button><button onClick={function(){ setConfirmId(c.id); }} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:7,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:700}}>X</button></div>
+                </div>
+              )}
+            </div>
+          );
+        })}
         {filtered.length===0&&<EmptyState msg="Aucun projet" icon="🔍"/>}
       </Card>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// STYLE DEVIS PAGE
+// ═════════════════════════════════════════════════════════════════════════════
+function StyleDevisPage({T, updateTheme}){
+  const {isMobile} = useBP();
+  const fileEntRef = useRef();
+  const fileCliRef = useRef();
+
+  function loadLogo(ref, key){
+    ref.current.click();
+    ref.current.onchange = function(e){
+      var f = e.target.files[0];
+      if(!f) return;
+      var r = new FileReader();
+      r.onload = function(ev){ updateTheme(key, ev.target.result); };
+      r.readAsDataURL(f);
+    };
+  }
+
+  function ColorRow({label, k}){
+    return (
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid "+T.border}}>
+        <div style={{fontSize:13,fontWeight:600}}>{label}</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:28,height:28,borderRadius:6,background:T[k],border:"2px solid "+T.border}}/>
+          <input type="color" value={T[k]||"#000000"} onChange={function(e){ updateTheme(k,e.target.value); }} style={{width:36,height:28,border:"none",borderRadius:6,cursor:"pointer",padding:2,background:"none"}}/>
+        </div>
+      </div>
+    );
+  }
+
+  // Live preview of the devis header
+  var previewBg = T.devisBg || "#ffffff";
+  var previewAccent = T.devisAccent || T.primary;
+  var previewText = T.devisText || "#222222";
+  var previewTableHead = T.devisTableHead || T.primary;
+  var previewTableHeadText = T.devisTableHeadText || "#ffffff";
+  var previewTotalBg = T.devisTotalBg || T.primary;
+  var previewBorderRadius = T.devisBorderRadius !== undefined ? T.devisBorderRadius : 8;
+  var previewFont = T.devisFont || "sans-serif";
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+
+      {/* LOGOS */}
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>🖼 Logos</div>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16}}>
+
+          {/* Logo entreprise */}
+          <div style={{background:T.mid,borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:10,alignItems:"center"}}>
+            <div style={{fontSize:12,color:T.muted,fontWeight:700}}>LOGO ENTREPRISE</div>
+            {T.logoEntreprise
+              ? <img src={T.logoEntreprise} alt="logo" style={{maxWidth:140,maxHeight:80,objectFit:"contain",borderRadius:6,background:"#fff",padding:4}}/>
+              : <div style={{width:140,height:80,border:"2px dashed "+T.border,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",color:T.muted,fontSize:12}}>Aucun logo</div>
+            }
+            <div style={{display:"flex",gap:8}}>
+              <input ref={fileEntRef} type="file" accept="image/*" style={{display:"none"}}/>
+              <button onClick={function(){ loadLogo(fileEntRef,"logoEntreprise"); }} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Choisir</button>
+              {T.logoEntreprise&&<button onClick={function(){ updateTheme("logoEntreprise",""); }} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer"}}>X</button>}
+            </div>
+          </div>
+
+          {/* Logo client */}
+          <div style={{background:T.mid,borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:10,alignItems:"center"}}>
+            <div style={{fontSize:12,color:T.muted,fontWeight:700}}>LOGO CLIENT (par defaut)</div>
+            {T.logoClient
+              ? <img src={T.logoClient} alt="logo client" style={{maxWidth:140,maxHeight:80,objectFit:"contain",borderRadius:6,background:"#fff",padding:4}}/>
+              : <div style={{width:140,height:80,border:"2px dashed "+T.border,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center",color:T.muted,fontSize:12}}>Aucun logo</div>
+            }
+            <div style={{display:"flex",gap:8}}>
+              <input ref={fileCliRef} type="file" accept="image/*" style={{display:"none"}}/>
+              <button onClick={function(){ loadLogo(fileCliRef,"logoClient"); }} style={{background:T.secondary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Choisir</button>
+              {T.logoClient&&<button onClick={function(){ updateTheme("logoClient",""); }} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"7px 12px",fontSize:12,cursor:"pointer"}}>X</button>}
+            </div>
+          </div>
+        </div>
+        <div style={{marginTop:10,fontSize:11,color:T.muted}}>Les logos apparaitront dans l'apercu et le PDF du devis. Format recommande : PNG transparent, max 500Ko.</div>
+      </div>
+
+      {/* COULEURS DEVIS */}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
+        <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+          <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>🎨 Couleurs du devis</div>
+          <ColorRow label="Fond general" k="devisBg"/>
+          <ColorRow label="Couleur accent / titres" k="devisAccent"/>
+          <ColorRow label="Texte principal" k="devisText"/>
+          <ColorRow label="En-tete tableau" k="devisTableHead"/>
+          <ColorRow label="Texte en-tete tableau" k="devisTableHeadText"/>
+          <ColorRow label="Bandeau total TTC" k="devisTotalBg"/>
+        </div>
+
+        {/* TYPOGRAPHIE & MISE EN PAGE */}
+        <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+          <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>🔤 Typographie & Mise en page</div>
+
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Police du devis</label>
+            <select value={T.devisFont||"sans-serif"} onChange={function(e){ updateTheme("devisFont",e.target.value); }} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"9px 12px",color:T.white,fontSize:14,outline:"none"}}>
+              {["sans-serif","serif","monospace","Arial, sans-serif","Georgia, serif","Courier New, monospace","Trebuchet MS, sans-serif"].map(function(f){ return <option key={f} value={f}>{f.split(",")[0]}</option>; })}
+            </select>
+          </div>
+
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Rayon des coins (px) : {previewBorderRadius}</label>
+            <input type="range" min={0} max={20} value={previewBorderRadius} onChange={function(e){ updateTheme("devisBorderRadius",parseInt(e.target.value)); }} style={{width:"100%",accentColor:T.primary}}/>
+          </div>
+
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Titre du devis (texte libre)</label>
+            <input value={T.devisTitre||"DEVIS"} onChange={function(e){ updateTheme("devisTitre",e.target.value); }} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"9px 12px",color:T.white,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+          </div>
+
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Mention pied de page</label>
+            <textarea value={T.devisMention||""} onChange={function(e){ updateTheme("devisMention",e.target.value); }} rows={2} placeholder="Mention legale, IBAN, site web..." style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"9px 12px",color:T.white,fontSize:13,outline:"none",boxSizing:"border-box",resize:"vertical"}}/>
+          </div>
+
+          <div>
+            <label style={{fontSize:11,color:T.muted,display:"block",marginBottom:6}}>Afficher les colonnes</label>
+            {[["showColRef","N° reference"],["showColUnite","Unite"],["showColPU","P.U. HT"],["showColTotal","Total HT"]].map(function(col){
+              var checked = T[col[0]] !== false;
+              return (
+                <div key={col[0]} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <div onClick={function(){ updateTheme(col[0],!checked); }} style={{width:36,height:20,borderRadius:10,background:checked?T.primary:T.mid,cursor:"pointer",position:"relative",transition:"background .2s"}}>
+                    <div style={{position:"absolute",top:2,left:checked?18:2,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                  </div>
+                  <span style={{fontSize:13}}>{col[1]}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* APERCU LIVE */}
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>👁 Apercu du devis</div>
+        <div style={{background:previewBg,borderRadius:previewBorderRadius,padding:isMobile?"14px":"24px",fontFamily:previewFont,color:previewText,border:"1px solid #ddd"}}>
+
+          {/* Header preview */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:12,flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:12,alignItems:"center"}}>
+              {T.logoEntreprise
+                ? <img src={T.logoEntreprise} alt="logo" style={{height:52,maxWidth:120,objectFit:"contain"}}/>
+                : <div style={{width:52,height:52,background:previewAccent,borderRadius:previewBorderRadius,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,color:"#fff"}}>🏗</div>
+              }
+              <div>
+                <div style={{fontSize:15,fontWeight:800,color:previewAccent}}>{T.companyName}</div>
+                <div style={{fontSize:10,color:"#777",lineHeight:1.6}}>{T.companyAddress}<br/>{T.companyTel}</div>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{background:previewAccent,color:"#fff",borderRadius:previewBorderRadius,padding:"5px 16px",fontWeight:800,fontSize:14,display:"inline-block"}}>{T.devisTitre||"DEVIS"}</div>
+              <div style={{fontSize:10,color:"#777",marginTop:6,lineHeight:1.7}}>N° DEV-2025-0001<br/>Date : {today()}</div>
+            </div>
+          </div>
+
+          {/* Client row */}
+          <div style={{background:previewAccent+"15",borderLeft:"4px solid "+previewAccent,borderRadius:previewBorderRadius,padding:"10px 14px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+            <div>
+              <div style={{fontSize:9,color:"#999",fontWeight:700,letterSpacing:1}}>CLIENT</div>
+              <div style={{fontWeight:700,fontSize:13}}>CLIENT EXEMPLE SARL</div>
+              <div style={{fontSize:11,color:"#666"}}>Abidjan, Cote d'Ivoire</div>
+            </div>
+            {T.logoClient&&<img src={T.logoClient} alt="client" style={{height:40,maxWidth:80,objectFit:"contain"}}/>}
+          </div>
+
+          {/* Table preview */}
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,marginBottom:12}}>
+            <thead>
+              <tr style={{background:previewTableHead,color:previewTableHeadText}}>
+                {T.showColRef!==false&&<th style={{padding:"6px 8px",textAlign:"left"}}>Ref</th>}
+                <th style={{padding:"6px 8px",textAlign:"left"}}>Designation</th>
+                <th style={{padding:"6px 8px",textAlign:"center"}}>Qte</th>
+                {T.showColUnite!==false&&<th style={{padding:"6px 8px",textAlign:"center"}}>Unite</th>}
+                {T.showColPU!==false&&<th style={{padding:"6px 8px",textAlign:"right"}}>P.U. HT</th>}
+                {T.showColTotal!==false&&<th style={{padding:"6px 8px",textAlign:"right"}}>Total HT</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {[["Fondations beton",2,"m3",85000],["Maconnerie parpaing",50,"m2",12000],["Couverture tole",1,"forfait",450000]].map(function(row,i){
+                var tl = row[1]*row[3];
+                return (
+                  <tr key={i} style={{background:i%2===0?"#fff":"#f8f8f8",borderBottom:"1px solid #eee"}}>
+                    {T.showColRef!==false&&<td style={{padding:"5px 8px",color:"#999"}}>{i+1}</td>}
+                    <td style={{padding:"5px 8px"}}>{row[0]}</td>
+                    <td style={{padding:"5px 8px",textAlign:"center"}}>{row[1]}</td>
+                    {T.showColUnite!==false&&<td style={{padding:"5px 8px",textAlign:"center",color:"#888"}}>{row[2]}</td>}
+                    {T.showColPU!==false&&<td style={{padding:"5px 8px",textAlign:"right"}}>{fmt(row[3])}</td>}
+                    {T.showColTotal!==false&&<td style={{padding:"5px 8px",textAlign:"right",fontWeight:700,color:previewAccent}}>{fmt(tl)}</td>}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {/* Total */}
+          <div style={{display:"flex",justifyContent:"flex-end"}}>
+            <table style={{width:220,borderCollapse:"collapse",fontSize:11}}>
+              <tbody>
+                <tr><td style={{padding:"5px 10px",color:"#666"}}>Sous-total HT</td><td style={{padding:"5px 10px",textAlign:"right",fontWeight:600}}>{fmt(1164000)}</td></tr>
+                <tr><td style={{padding:"5px 10px",color:"#666"}}>TVA (18%)</td><td style={{padding:"5px 10px",textAlign:"right",fontWeight:600}}>{fmt(209520)}</td></tr>
+                <tr style={{background:previewTotalBg,color:"#fff"}}><td style={{padding:"8px 10px",fontWeight:800}}>TOTAL TTC</td><td style={{padding:"8px 10px",textAlign:"right",fontWeight:800}}>{fmt(1373520)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          {T.devisMention&&<div style={{marginTop:12,padding:"8px 12px",background:"#f5f5f5",borderRadius:previewBorderRadius,fontSize:10,color:"#777"}}>{T.devisMention}</div>}
+        </div>
+      </div>
+
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <button onClick={function(){
+          ["devisBg","devisAccent","devisText","devisTableHead","devisTableHeadText","devisTotalBg","devisFont","devisBorderRadius","devisTitre","devisMention","showColRef","showColUnite","showColPU","showColTotal","logoEntreprise","logoClient"].forEach(function(k){ updateTheme(k, DEFAULT_THEME[k] !== undefined ? DEFAULT_THEME[k] : undefined); });
+        }} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 20px",fontWeight:700,cursor:"pointer"}}>
+          Reinitialiser le style devis
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PARAMETRES
+// ═════════════════════════════════════════════════════════════════════════════
+function ParametresPage({T,updateTheme,resetTheme}){
+  const {isMobile} = useBP();
+  var presets = [
+    {label:"BTP Orange",colors:{primary:"#F97316",secondary:"#3B82F6",bg:"#1C1917",card:"#292524"}},
+    {label:"Bleu Pro",colors:{primary:"#2563EB",secondary:"#7C3AED",bg:"#0F172A",card:"#1E293B"}},
+    {label:"Vert Nature",colors:{primary:"#16A34A",secondary:"#0891B2",bg:"#14532D",card:"#166534"}},
+    {label:"Rouge BTP",colors:{primary:"#DC2626",secondary:"#D97706",bg:"#1C0A0A",card:"#2C1010"}},
+    {label:"Dark Pro",colors:{primary:"#6366F1",secondary:"#EC4899",bg:"#000000",card:"#111111"}},
+  ];
+  function ColorRow({label,k}){
+    return (
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid "+T.border}}>
+        <div><div style={{fontSize:13,fontWeight:600}}>{label}</div><div style={{fontSize:11,color:T.muted,marginTop:2}}>{T[k]}</div></div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:32,height:32,borderRadius:8,background:T[k],border:"2px solid "+T.border}}/>
+          <input type="color" value={T[k]} onChange={function(e){ updateTheme(k,e.target.value); }} style={{width:40,height:32,border:"none",borderRadius:6,cursor:"pointer",padding:2,background:"none"}}/>
+        </div>
+      </div>
+    );
+  }
+  function TextRow({label,k,placeholder}){
+    return (
+      <div style={{padding:"10px 0",borderBottom:"1px solid "+T.border}}>
+        <div style={{fontSize:11,color:T.muted,marginBottom:5}}>{label}</div>
+        <input value={T[k]} onChange={function(e){ updateTheme(k,e.target.value); }} placeholder={placeholder} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"8px 12px",color:T.white,fontSize:14,outline:"none",boxSizing:"border-box"}}/>
+      </div>
+    );
+  }
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+        <div style={{fontWeight:700,fontSize:14,marginBottom:14}}>Themes predefinies</div>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(3,1fr)",gap:10}}>
+          {presets.map(function(p){
+            return (
+              <button key={p.label} onClick={function(){ Object.entries(p.colors).forEach(function(e){ updateTheme(e[0],e[1]); }); }} style={{background:p.colors.card,border:"2px solid "+p.colors.primary,borderRadius:10,padding:"12px",cursor:"pointer",textAlign:"left"}}>
+                <div style={{display:"flex",gap:6,marginBottom:8}}>{Object.values(p.colors).map(function(c,i){ return <div key={i} style={{width:16,height:16,borderRadius:"50%",background:c}}/>; })}</div>
+                <div style={{fontSize:12,fontWeight:700,color:p.colors.primary}}>{p.label}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
+        <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>Couleurs</div>
+          <ColorRow label="Couleur principale" k="primary"/>
+          <ColorRow label="Couleur secondaire" k="secondary"/>
+          <ColorRow label="Succes" k="success"/>
+          <ColorRow label="Danger" k="danger"/>
+          <ColorRow label="Avertissement" k="warning"/>
+          <ColorRow label="Fond general" k="bg"/>
+          <ColorRow label="Fond carte" k="card"/>
+        </div>
+        <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"18px 20px"}}>
+          <div style={{fontWeight:700,fontSize:14,marginBottom:4}}>Informations entreprise</div>
+          <TextRow label="Nom entreprise" k="companyName" placeholder="JEAN BTP SARL"/>
+          <TextRow label="Adresse" k="companyAddress" placeholder="Zone Industrielle, Abidjan"/>
+          <TextRow label="Telephone" k="companyTel" placeholder="+225 27 00 00 00"/>
+          <TextRow label="Email" k="companyEmail" placeholder="devis@jeanbtp.ci"/>
+          <TextRow label="SIRET / RC" k="companySiret" placeholder="CI-ABJ-2024-B-12345"/>
+        </div>
+      </div>
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <button onClick={resetTheme} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 20px",fontWeight:700,cursor:"pointer"}}>Reinitialiser le theme</button>
+      </div>
     </div>
   );
 }
