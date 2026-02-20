@@ -1077,27 +1077,61 @@ function SessionDetail(props){
     setImporting(true);setImportLog(null);
     try{
       var SheetJS=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
-      var buf=await file.arrayBuffer();var wb=SheetJS.read(buf,{type:"array"});var ws=wb.Sheets[wb.SheetNames[0]];var rows=SheetJS.utils.sheet_to_json(ws,{defval:""});
-      if(!rows.length)throw new Error("Feuille vide");
-      var keys=Object.keys(rows[0]);
-      function findCol(hints){return keys.find(function(k){return hints.some(function(h){return k.toLowerCase().indexOf(h.toLowerCase())>=0;});});}
-      var cLib=findCol(["libelle","designation","description","ouvrage","tache","nom"]);
-      var cQte=findCol(["qte","quantite","qt","nb","nombre"]);
-      var cPU=findCol(["prix unitaire","pu","p.u","unitaire","montant unitaire","cout"]);
-      var cUn=findCol(["unite","unit"]);
-      if(!cLib)throw new Error("Colonne libelle introuvable. Colonnes: "+keys.join(", "));
+      var buf=await file.arrayBuffer();
+      var wb=SheetJS.read(buf,{type:"array"});
+      var ws=wb.Sheets[wb.SheetNames[0]];
+      // Lire toutes les lignes brutes (tableau de tableaux)
+      var raw=SheetJS.utils.sheet_to_json(ws,{header:1,defval:""});
+      // Supprimer lignes totalement vides
+      raw=raw.filter(function(r){return r.some(function(c){return String(c).trim()!=="";});});
+      if(!raw.length)throw new Error("Feuille vide");
+      // Envoyer un échantillon (10 premières lignes) à Claude pour analyse intelligente
+      var sample=raw.slice(0,12);
+      var prompt="Tu es expert BTP Cote d'Ivoire. Voici les premieres lignes d'un fichier Excel (tableau de tableaux, chaque sous-tableau = une ligne):\n"
+        +JSON.stringify(sample)+"\n\n"
+        +"Analyse ce fichier et reponds UNIQUEMENT en JSON valide sans markdown:\n"
+        +"{\n"
+        +"  \"colLibelle\": <index colonne designation/libelle/ouvrage, number>,\n"
+        +"  \"colQuantite\": <index colonne quantite, number ou null>,\n"
+        +"  \"colUnite\": <index colonne unite, number ou null>,\n"
+        +"  \"colPrixUnitaire\": <index colonne prix unitaire HT, number ou null>,\n"
+        +"  \"colMontantTotal\": <index colonne montant total, number ou null>,\n"
+        +"  \"colSalaire\": <index colonne salaire/MO, number ou null>,\n"
+        +"  \"colMateriau\": <index colonne materiaux, number ou null>,\n"
+        +"  \"colMateriel\": <index colonne materiel/engin, number ou null>,\n"
+        +"  \"colSousTraitance\": <index colonne sous-traitance, number ou null>,\n"
+        +"  \"ligneDebut\": <index ligne ou commencent les vraies donnees (apres en-tete), number>,\n"
+        +"  \"explication\": \"string court expliquant la structure detectee\"\n"
+        +"}";
+      var aiResp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})});
+      var aiData=await aiResp.json();
+      var aiTxt=(aiData.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();
+      var mapping=JSON.parse(aiTxt);
+      setImportLog({ok:true,msg:"🤖 Structure détectée : "+mapping.explication});
+      // Extraire les données à partir de la ligne détectée
+      var dataRows=raw.slice(mapping.ligneDebut||1);
       var imported=0,skipped=0;
-      for(var i=0;i<rows.length;i++){
-        var row=rows[i];var lib=String(row[cLib]||"").trim();
+      for(var i=0;i<dataRows.length;i++){
+        var row=dataRows[i];
+        var lib=String(row[mapping.colLibelle]||"").trim();
         if(!lib||lib.length<2){skipped++;continue;}
-        var qte=parseFloat(String(row[cQte]||"1").replace(/\s/g,"").replace(",","."))||1;
-        var pu=parseFloat(String(row[cPU]||"0").replace(/\s/g,"").replace(",","."))||0;
-        var un=cUn?String(row[cUn]||"U").trim():"U";
-        var c=calcTache({quantite:qte,salaire:0,rendement:1,materiau:0,materiel:0,sous_traitance:pu},cfg.tc,cfg);
-        await q("debourse_taches").insert({session_id:sess.id,libelle:lib,unite:un||"U",quantite:qte,salaire:0,rendement:1,materiau:0,materiel:0,sous_traitance:pu,main_oeuvre_u:0,debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)});
+        // Ignorer lignes de sous-total / total
+        if(/total|sous.total|cumul|somme/i.test(lib)){skipped++;continue;}
+        var qte=parseFloat(String(row[mapping.colQuantite!=null?mapping.colQuantite:-1]||"1").replace(/\s/g,"").replace(",","."))||1;
+        var un=mapping.colUnite!=null?String(row[mapping.colUnite]||"U").trim():"U";
+        var pu=0;
+        if(mapping.colPrixUnitaire!=null)pu=parseFloat(String(row[mapping.colPrixUnitaire]||"0").replace(/\s/g,"").replace(",","."))||0;
+        else if(mapping.colMontantTotal!=null){var mt=parseFloat(String(row[mapping.colMontantTotal]||"0").replace(/\s/g,"").replace(",","."))||0;pu=qte>0?mt/qte:mt;}
+        var salaire=mapping.colSalaire!=null?parseFloat(String(row[mapping.colSalaire]||"0").replace(/\s/g,"").replace(",","."))||0:0;
+        var materiau=mapping.colMateriau!=null?parseFloat(String(row[mapping.colMateriau]||"0").replace(/\s/g,"").replace(",","."))||0:0;
+        var materiel=mapping.colMateriel!=null?parseFloat(String(row[mapping.colMateriel]||"0").replace(/\s/g,"").replace(",","."))||0:0;
+        var sousTrait=mapping.colSousTraitance!=null?parseFloat(String(row[mapping.colSousTraitance]||"0").replace(/\s/g,"").replace(",","."))||0:pu;
+        var c=calcTache({quantite:qte,salaire:salaire,rendement:1,materiau:materiau,materiel:materiel,sous_traitance:sousTrait},cfg.tc,cfg);
+        await q("debourse_taches").insert({session_id:sess.id,libelle:lib,unite:un||"U",quantite:qte,salaire:salaire,rendement:1,materiau:materiau,materiel:materiel,sous_traitance:sousTrait,main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)});
         imported++;
       }
-      setImportLog({ok:true,msg:"✅ "+imported+" tache(s) importee(s)"+(skipped?", "+skipped+" ignoree(s)":"")});reload();
+
+      setImportLog({ok:true,msg:"✅ "+imported+" tache(s) importee(s)"+(skipped?", "+skipped+" ignoree(s)":"")+"\n🤖 "+mapping.explication});reload();
     }catch(e){setImportLog({ok:false,msg:"Erreur: "+e.message});}
     setImporting(false);
   }
