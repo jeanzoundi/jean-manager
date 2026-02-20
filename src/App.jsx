@@ -1103,7 +1103,10 @@ function SessionDetail(props){
         +"  \"ligneDebut\": <index ligne ou commencent les vraies donnees (apres en-tete), number>,\n"
         +"  \"explication\": \"string court expliquant la structure detectee\"\n"
         +"}";
-      var aiResp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})});
+      var apiUrl=window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1"?"https://api.anthropic.com/v1/messages":"/api/claude";
+      var apiHeaders=apiUrl.includes("anthropic")?{"Content-Type":"application/json"}:{"Content-Type":"application/json"};
+      var aiResp=await fetch(apiUrl,{method:"POST",headers:apiHeaders,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})});
+      if(!aiResp.ok){var errTxt=await aiResp.text();throw new Error("API "+aiResp.status+": "+errTxt.slice(0,200));}
       var aiData=await aiResp.json();
       var aiTxt=(aiData.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();
       var mapping=JSON.parse(aiTxt);
@@ -1144,7 +1147,8 @@ function SessionDetail(props){
       var b64=await new Promise(function(res,rej){var r=new FileReader();r.onload=function(e){res(e.target.result.split(",")[1]);};r.onerror=rej;r.readAsDataURL(file);});
       var contentBlock=isPDF?{type:"document",source:{type:"base64",media_type:file.type,data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
       var prompt="Tu es un expert BTP. Analyse ce "+(isPDF?"PDF":"document")+" qui est un devis ou facture fournisseur. Extrais TOUTES les lignes. Reponds UNIQUEMENT en JSON valide sans markdown : {\"taches\":[{\"libelle\":\"string\",\"quantite\":1,\"unite\":\"string\",\"prix_unitaire\":0}]}";
-      var resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]})});
+      var resp=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]})});
+    if(!resp.ok){var errTxt=await resp.text();throw new Error("API "+resp.status+": "+errTxt.slice(0,200));}
       var data=await resp.json();
       var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();
       var parsed=JSON.parse(txt);
@@ -1472,7 +1476,7 @@ function IA(props){
   function run(){
     setLoading(true);setError(null);setResult(null);
     var ctx={chantiers:ch.map(function(c){return{nom:c.nom,statut:c.statut,budget:c.budgetInitial,depenses:totalDep(c),pct:pct(totalDep(c),c.budgetInitial)};}),interventions:intv.slice(0,20).map(function(i){return{titre:i.titre,type:i.type,statut:i.statut};}),devis:{total:dv.length,acceptes:dv.filter(function(d){return d.statut==="accepte";}).length,ca:dv.filter(function(d){return d.statut==="accepte";}).reduce(function(a,d){return a+(d.total_ttc||0);},0)}};
-    fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:"Tu es expert BTP Cote d'Ivoire. Analyse ce portefeuille (XOF). Reponds UNIQUEMENT en JSON valide:\n"+JSON.stringify(ctx)+"\n\nFormat strict: {\"recommandations\":[{\"titre\":\"string\",\"detail\":\"string\",\"priorite\":\"haute\"}],\"scoreGlobal\":75,\"synthese\":\"string\",\"pointsForts\":[\"string\"],\"risques\":[\"string\"]}"}]})})
+    fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:"Tu es expert BTP Cote d'Ivoire. Analyse ce portefeuille (XOF). Reponds UNIQUEMENT en JSON valide:\n"+JSON.stringify(ctx)+"\n\nFormat strict: {\"recommandations\":[{\"titre\":\"string\",\"detail\":\"string\",\"priorite\":\"haute\"}],\"scoreGlobal\":75,\"synthese\":\"string\",\"pointsForts\":[\"string\"],\"risques\":[\"string\"]}"}]})})
       .then(function(r){return r.json();})
       .then(function(data){var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();setResult(JSON.parse(txt));setLoading(false);})
       .catch(function(e){setError("Erreur IA : "+e.message);setLoading(false);});
