@@ -472,7 +472,7 @@ export default function App(){
   function reloadAll(){ch.reload();intv.reload();dv.reload();db.reload();}
   var nbAl=ch.data.filter(function(c){var p=pct(totalDep(c),c.budgetInitial);return p>100||c.statut==="En derive";}).length;
   var nbInt=intv.data.filter(function(i){return i.statut==="En cours";}).length;
-  var nav=[{key:"dashboard",icon:"📊",label:"Dashboard"},{key:"chantiers",icon:"🏗️",label:"Chantiers"},{key:"devis",icon:"📄",label:"Devis"},{key:"debourse",icon:"🔢",label:"Debours Sec"},{key:"interventions",icon:"🔧",label:"Interventions",badge:nbInt},{key:"alertes",icon:"🔔",label:"Alertes",badge:nbAl},{key:"kpi",icon:"📈",label:"KPIs"},{key:"ia",icon:"🤖",label:"IA"},{key:"gestion",icon:"⚙️",label:"Gestion"},{key:"parametres",icon:"🎨",label:"Apparence"}];
+  var nav=[{key:"dashboard",icon:"📊",label:"Dashboard"},{key:"chantiers",icon:"🏗️",label:"Chantiers"},{key:"devis",icon:"📄",label:"Devis"},{key:"debourse",icon:"🔢",label:"Debours Sec"},{key:"interventions",icon:"🔧",label:"Interventions",badge:nbInt},{key:"kpi",icon:"📈",label:"KPIs"},{key:"ia",icon:"🤖",label:"IA"},{key:"gestion",icon:"⚙️",label:"Gestion"},{key:"parametres",icon:"🎨",label:"Apparence"}];
   var selected=ch.data.find(function(c){return c.id===selId;});
   function NavBtn(p){
     var n=p.n,active=page===n.key||(page==="fiche"&&n.key==="chantiers");
@@ -522,7 +522,6 @@ export default function App(){
               {page==="devis"&&<Devis dv={dv.data} ch={ch.data} reload={dv.reload} T={T} upT={upT}/>}
               {page==="debourse"&&<Debourse sessions={db.sessions} taches={db.taches} ch={ch.data} reload={db.reload} T={T}/>}
               {page==="interventions"&&<Interventions intv={intv.data} ch={ch.data} reload={intv.reload} T={T}/>}
-              {page==="alertes"&&<Alertes ch={ch.data} openCh={openCh} T={T}/>}
               {page==="kpi"&&<KpiPage ch={ch.data} dv={dv.data} intv={intv.data} T={T}/>}
               {page==="ia"&&<IA ch={ch.data} intv={intv.data} dv={dv.data} T={T}/>}
               {page==="gestion"&&<Gestion ch={ch.data} openCh={openCh} reload={ch.reload} T={T}/>}
@@ -1537,7 +1536,12 @@ function Parametres(props){
         </div>
       </Card>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20}}>
-        <Card title="Couleurs interface" T={T}>{uiColors.map(function(row){return <ColorRow key={row[1]} label={row[0]} k={row[1]} T={T} upT={upT}/>;})}</Card>
+        <Card title="Couleurs interface" T={T}>{uiColors.map(function(row){return(
+            <div key={row[1]} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:"1px solid "+T.border}}>
+              <div style={{fontSize:13,fontWeight:600}}>{row[0]}</div>
+              <div style={{width:32,height:32,borderRadius:8,background:T[row[1]]||"#000",border:"2px solid "+T.border}}/>
+            </div>
+          );})}</Card>
         <Card title="Informations entreprise" T={T}>
           {companyFields.map(function(row){return(
             <div key={row[1]} style={{padding:"10px 0",borderBottom:"1px solid "+T.border}}>
