@@ -1073,7 +1073,7 @@ function SessionDetail(props){
     q("debourse_taches").insert({session_id:sess.id,libelle:tForm.libelle,unite:tForm.unite,quantite:parseFloat(tForm.quantite)||0,salaire:parseFloat(tForm.salaire)||0,rendement:parseFloat(tForm.rendement)||1,materiau:parseFloat(tForm.materiau)||0,materiel:parseFloat(tForm.materiel)||0,sous_traitance:parseFloat(tForm.sous_traitance)||0,main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)})
       .then(function(){setSaving(false);setShowNew(false);setTForm({libelle:"",unite:"U",quantite:0,salaire:0,rendement:1,materiau:0,materiel:0,sous_traitance:0});reload();});
   }
-  async function handleExcel(file){
+  async function handleExcelOLD(file){
     setImporting(true);setImportLog(null);
     try{
       var SheetJS=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
@@ -1161,7 +1161,7 @@ function SessionDetail(props){
     }catch(e){setImportLog({ok:false,msg:"Erreur: "+e.message});}
     setImporting(false);
   }
-  function onFileChange(e){var file=e.target.files[0];if(!file)return;e.target.value="";var ext=file.name.split(".").pop().toLowerCase();if(ext==="xlsx"||ext==="xls")handleExcel(file);else handleAI(file);}
+  function onFileChange(e){var file=e.target.files[0];if(!file)return;e.target.value="";handleAI(file);}
   var iS={background:T.bg,border:"1px solid "+T.border,borderRadius:5,padding:"4px 7px",color:T.white,fontSize:11,outline:"none",width:"100%"};
   return(
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
