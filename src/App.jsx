@@ -1108,8 +1108,11 @@ function SessionDetail(props){
       var aiResp=await fetch(apiUrl,{method:"POST",headers:apiHeaders,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:prompt}]})});
       if(!aiResp.ok){var errTxt=await aiResp.text();throw new Error("API "+aiResp.status+": "+errTxt.slice(0,200));}
       var aiData=await aiResp.json();
-      var aiTxt=(aiData.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();
-      var mapping=JSON.parse(aiTxt);
+      var aiTxt=(aiData.content||[]).map(function(i){return i.text||"";}).join("");
+      // Extraire uniquement le bloc JSON entre { }
+      var jsonMatch=aiTxt.match(/\{[\s\S]*\}/);
+      if(!jsonMatch)throw new Error("L'IA n'a pas retourné de JSON valide");
+      var mapping=JSON.parse(jsonMatch[0]);
       setImportLog({ok:true,msg:"🤖 Structure détectée : "+mapping.explication});
       // Extraire les données à partir de la ligne détectée
       var dataRows=raw.slice(mapping.ligneDebut||1);
@@ -1150,8 +1153,10 @@ function SessionDetail(props){
       var resp=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]})});
     if(!resp.ok){var errTxt=await resp.text();throw new Error("API "+resp.status+": "+errTxt.slice(0,200));}
       var data=await resp.json();
-      var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();
-      var parsed=JSON.parse(txt);
+      var txt=(data.content||[]).map(function(i){return i.text||"";}).join("");
+      var jsonMatch2=txt.match(/\{[\s\S]*\}/);
+      if(!jsonMatch2)throw new Error("L'IA n'a pas retourné de JSON valide");
+      var parsed=JSON.parse(jsonMatch2[0]);
       if(!parsed.taches||!parsed.taches.length)throw new Error("Aucune tache extraite");
       var imported=0;
       for(var i=0;i<parsed.taches.length;i++){
@@ -1478,7 +1483,7 @@ function IA(props){
     var ctx={chantiers:ch.map(function(c){return{nom:c.nom,statut:c.statut,budget:c.budgetInitial,depenses:totalDep(c),pct:pct(totalDep(c),c.budgetInitial)};}),interventions:intv.slice(0,20).map(function(i){return{titre:i.titre,type:i.type,statut:i.statut};}),devis:{total:dv.length,acceptes:dv.filter(function(d){return d.statut==="accepte";}).length,ca:dv.filter(function(d){return d.statut==="accepte";}).reduce(function(a,d){return a+(d.total_ttc||0);},0)}};
     fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1200,messages:[{role:"user",content:"Tu es expert BTP Cote d'Ivoire. Analyse ce portefeuille (XOF). Reponds UNIQUEMENT en JSON valide:\n"+JSON.stringify(ctx)+"\n\nFormat strict: {\"recommandations\":[{\"titre\":\"string\",\"detail\":\"string\",\"priorite\":\"haute\"}],\"scoreGlobal\":75,\"synthese\":\"string\",\"pointsForts\":[\"string\"],\"risques\":[\"string\"]}"}]})})
       .then(function(r){return r.json();})
-      .then(function(data){var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").replace(/```json|```/g,"").trim();setResult(JSON.parse(txt));setLoading(false);})
+      .then(function(data){var txt=(data.content||[]).map(function(i){return i.text||"";}).join("");var jm=txt.match(/\{[\s\S]*\}/);if(!jm)throw new Error("JSON invalide");setResult(JSON.parse(jm[0]));setLoading(false);})
       .catch(function(e){setError("Erreur IA : "+e.message);setLoading(false);});
   }
   return(
