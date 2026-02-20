@@ -1,13 +1,7 @@
+
 {
-  "routes": [
-    {
-      "src": "/api/claude",
-      "dest": "/api/claude.js",
-      "methods": ["POST", "OPTIONS"]
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+  "rewrites": [
+    { "source": "/api/claude", "destination": "/api/claude.js" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
