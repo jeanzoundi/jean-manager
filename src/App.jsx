@@ -320,29 +320,40 @@ function IAOuvrageModal(p){
     if(!query.trim())return;
     setLoading(true);setErr(null);setResult(null);setDone(false);
     try{
-      var prompt="Tu es expert BTP Cote d'Ivoire. Decompose cet ouvrage BTP en elements constitutifs pour etablir un debours sec complet.\n"
-        +"Ouvrage: "+query+"\n\n"
-        +"Pour chaque element constitutif:\n"
-        +"1. Identifie toutes les taches elementaires (main d'oeuvre, materiaux, materiel, sous-traitance)\n"
-        +"2. Donne des ratios et quantites realistes pour la Cote d'Ivoire (prix en XOF)\n"
-        +"3. Calcule les debours secs par element\n\n"
-        +"Reponds en lignes CSV pipe, UNE LIGNE PAR ELEMENT:\n"
-        +"LIBELLE|UNITE|QUANTITE|SALAIRE_J|RENDEMENT|MATERIAUX_U|MATERIEL_U|SOUS_TRAITANCE_U|CATEGORIE\n"
-        +"Regles:\n"
-        +"- LIBELLE: nom de l element sans guillemets\n"
+      var prompt="Tu es Expert BTP Senior Cote d'Ivoire / Afrique de l'Ouest, specialiste en estimation et debours sec.\n"
+        +"Ouvrage a decomposen: "+query+"\n\n"
+        +"=== ETAPE 1 — ANALYSE DE L'OUVRAGE ===\n"
+        +"Identifier: nature (terrassement/fondation/elevation/plomberie/electricite/finition...), sous-composants necessaires.\n\n"
+        +"=== ETAPE 2 — DECOMPOSITION EN ELEMENTS CONSTITUTIFS ===\n"
+        +"Pour chaque element, respecter:\n"
+        +"MATERIAUX: dosages beton realistes, consommation acier coherente, rendement agglos/m2, pertes chantier 5-10%\n"
+        +"MAIN D'OEUVRE: type ouvrier (macon/ferrailleur/coffreur/manoeuvre), rendement journalier realiste, nb ouvriers, cout journalier local XOF\n"
+        +"MATERIEL: location pelle, betonniere, vibrateur, camion, echafaudage si necessaire\n"
+        +"SOUS-TRAITANCE: si applicable\n\n"
+        +"=== ETAPE 3 — VERIFICATIONS TECHNIQUES ===\n"
+        +"Verifier: coherence rendements, coherence volumes, logique chantier, ordre execution, realisme economique Afrique de l'Ouest\n\n"
+        +"=== FORMAT DE REPONSE — CSV PIPE OBLIGATOIRE ===\n"
+        +"Reponds en lignes CSV pipe, UNE LIGNE PAR ELEMENT CONSTITUTIF:\n"
+        +"LIBELLE|UNITE|QUANTITE|SALAIRE_J|RENDEMENT|MATERIAUX_U|MATERIEL_U|SOUS_TRAITANCE_U|CATEGORIE|TYPE_OUVRIER|NB_OUVRIERS\n"
+        +"Regles strictes:\n"
+        +"- LIBELLE: designation precise de l element (ex: Beton de fondation C20/25, Ferraillage semelle HA12, Coffrage bois perdu)\n"
         +"- UNITE: m2/ml/m3/U/h/j/kg/t/forfait\n"
-        +"- QUANTITE: quantite de base (ex: 1 m2 ou 1 ml)\n"
-        +"- SALAIRE_J: salaire journalier ouvrier en XOF (ex: 5000)\n"
-        +"- RENDEMENT: unites produites par journee ouvrier (ex: 2)\n"
-        +"- MATERIAUX_U: cout materiaux par unite en XOF\n"
-        +"- MATERIEL_U: cout materiel/engins par unite en XOF\n"
-        +"- SOUS_TRAITANCE_U: cout sous-traitance par unite en XOF\n"
-        +"- CATEGORIE: MO/Materiaux/Materiel/Sous-traitance/Mixte\n"
-        +"Exemple pour 1m2 de beton:\n"
-        +"Coffrage bois|m2|1|5000|3|8000|1500|0|Mixte\n"
-        +"Ferraillage|kg|50|5000|80|650|0|0|Mixte\n"
-        +"Beton C25/30 coule|m3|0.12|5000|2|95000|8000|0|Mixte\n"
-        +"Commence directement par les lignes CSV, pas d introduction.";
+        +"- QUANTITE: quantite reelle pour l ouvrage decrit (pas toujours 1)\n"
+        +"- SALAIRE_J: salaire journalier ouvrier en XOF (macon=6000-8000, ferrailleur=7000-9000, manoeuvre=4000-5000)\n"
+        +"- RENDEMENT: unites produites par journee par ouvrier (ex: macon=2m3 beton, ferrailleur=80kg/j)\n"
+        +"- MATERIAUX_U: cout total materiaux par unite en XOF (inclure pertes)\n"
+        +"- MATERIEL_U: cout location materiel par unite en XOF\n"
+        +"- SOUS_TRAITANCE_U: 0 si fait en regie\n"
+        +"- CATEGORIE: Materiaux/MO/Materiel/Sous-traitance/Mixte\n"
+        +"- TYPE_OUVRIER: macon/ferrailleur/coffreur/manoeuvre/conducteur/electricien/plombier\n"
+        +"- NB_OUVRIERS: nombre d ouvriers necessaires (integer)\n"
+        +"Exemples realistes Cote d'Ivoire:\n"
+        +"Fouille mecanique en rigole|m3|10|0|0|0|12000|0|Materiel|conducteur engin|1\n"
+        +"Beton de proprete C10 ep5cm|m3|0.5|5000|1.5|85000|8000|0|Mixte|macon|2\n"
+        +"Ferraillage semelle HA10-12|kg|120|7500|80|680|0|0|MO|ferrailleur|2\n"
+        +"Coffrage bois perdu semelle|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
+        +"Beton arme C25/30 semelle|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
+        +"Commence DIRECTEMENT par les lignes CSV sans introduction ni commentaire.";
       var resp=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:prompt}]})});
       if(!resp.ok)throw new Error("API "+resp.status);
       var data=await resp.json();
@@ -357,7 +368,7 @@ function IAOuvrageModal(p){
         if(parts.length<8)return;
         var lib=parts[0].replace(/^[-*•\d.]+\s*/,"").trim();
         if(!lib||lib.length<2)return;
-        if(/^(libelle|designation|element|tache)/i.test(lib))return;
+        if(/^(libelle|designation|element|tache|ouvrage)/i.test(lib))return;
         items.push({
           libelle:lib,
           unite:String(parts[1]||"U").trim(),
@@ -367,11 +378,22 @@ function IAOuvrageModal(p){
           materiau:parseNum(parts[5])||0,
           materiel:parseNum(parts[6])||0,
           sous_traitance:parseNum(parts[7])||0,
-          categorie:String(parts[8]||"Mixte").trim()
+          categorie:String(parts[8]||"Mixte").trim(),
+          typeOuvrier:String(parts[9]||"").trim(),
+          nbOuvriers:parseInt(parts[10])||1
         });
       });
       if(!items.length)throw new Error("Aucun element extrait — reformulez l ouvrage");
-      setResult(items);
+      // Calcul totaux par categorie
+      var totMat=0,totMO=0,totMateriel=0,totST=0;
+      items.forEach(function(t){
+        var c=calcTache(t,cfg2.tc,cfg2);
+        totMO+=c.mo*t.quantite;
+        totMat+=(t.materiau||0)*t.quantite;
+        totMateriel+=(t.materiel||0)*t.quantite;
+        totST+=(t.sous_traitance||0)*t.quantite;
+      });
+      setResult({items:items,totMat:totMat,totMO:totMO,totMateriel:totMateriel,totST:totST});
     }catch(e){setErr(e.message);}
     setLoading(false);
   }
@@ -398,37 +420,68 @@ function IAOuvrageModal(p){
 
   var cfg2={tc:40,fg:15,benef:10};
   if(selSess){var s2=sessions.find(function(s){return s.id===selSess;});if(s2)cfg2={tc:s2.taux_charges,fg:s2.coeff_fg,benef:s2.coeff_benef};}
-  var totDS=result?result.reduce(function(a,t){var c=calcTache(t,cfg2.tc,cfg2);return a+c.ds*t.quantite;},0):0;
-  var totPV=result?result.reduce(function(a,t){var c=calcTache(t,cfg2.tc,cfg2);return a+c.pvt;},0):0;
+  var items=result?result.items:[];
+  var totDS=items.reduce(function(a,t){var c=calcTache(t,cfg2.tc,cfg2);return a+c.ds*t.quantite;},0);
+  var totPV=items.reduce(function(a,t){var c=calcTache(t,cfg2.tc,cfg2);return a+c.pvt;},0);
+  var totDSU=items.length>0?totDS/items.reduce(function(a,t){return a+t.quantite;},0):0;
 
-  return <Modal title="🤖 IA — Décomposition d'ouvrage BTP" onClose={onClose} T={T}>
+  return <Modal title="🤖 IA — Décomposition intelligente d'ouvrage BTP" onClose={onClose} T={T}>
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <div style={{background:T.secondary+"11",border:"1px solid "+T.secondary+"44",borderRadius:10,padding:"12px 16px",fontSize:12,color:T.muted}}>
-        Décrivez un ouvrage BTP — l'IA le décompose automatiquement en éléments constitutifs avec les ratios MO, matériaux, matériel et sous-traitance pour établir le débours sec complet.
+        Décrivez précisément un ouvrage BTP — l'IA applique les 4 étapes d'analyse (identification, décomposition MO/Matériaux/Matériel, vérification technique, récapitulatif) avec des ratios réalistes Côte d'Ivoire.
       </div>
-      <FF label="Ouvrage à décomposer" value={query} onChange={setQuery} placeholder="Ex: 1 m2 de dallage en béton armé C25/30 ep.15cm, Maçonnerie en parpaing 15cm, Fondation semelle filante..." rows={3} full T={T}/>
-      <button onClick={analyze} disabled={loading||!query.trim()} style={{background:loading?T.mid:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"12px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"🔍 Analyse en cours...":"🤖 Décomposer l'ouvrage"}</button>
+      <FF label="Ouvrage à décomposer" value={query} onChange={setQuery} placeholder="Ex: Semelle filante 40x60cm béton armé C25/30, 1 m2 dallage béton armé ép.15cm, Maçonnerie parpaing 15cm..." rows={3} full T={T}/>
+      <button onClick={analyze} disabled={loading||!query.trim()} style={{background:loading?T.mid:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"12px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"🔍 Analyse en cours (4 étapes)...":"🤖 Analyser et décomposer l'ouvrage"}</button>
       {err&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 14px",color:T.danger,fontSize:12}}>⚠️ {err}</div>}
-      {result&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-          <div style={{fontWeight:700,fontSize:14,color:T.primary}}>{result.length} éléments constitutifs</div>
-          <div style={{display:"flex",gap:8}}>
-            <div style={{background:T.warning+"22",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:T.warning}}>DS: {fmtS(totDS)}</div>
-            <div style={{background:T.success+"22",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:700,color:T.success}}>PV: {fmtS(totPV)}</div>
-          </div>
+      {result&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* KPIs récap */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+          {[["🧱 Matériaux",result.totMat,T.primary],["👷 Main d'œuvre",result.totMO,T.secondary],["⚙️ Matériel",result.totMateriel,T.warning],["🔨 DS Total",totDS,T.success]].map(function(r,i){return <div key={i} style={{background:r[2]+"11",border:"1px solid "+r[2]+"33",borderRadius:8,padding:"10px 12px",textAlign:"center"}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{r[0]}</div><div style={{fontWeight:800,fontSize:13,color:r[2]}}>{fmtS(Math.round(r[1]))}</div></div>;})}
         </div>
+        {/* Tableau détail */}
+        <div style={{fontWeight:700,fontSize:13,color:T.primary,borderBottom:"1px solid "+T.border,paddingBottom:6}}>📋 Éléments constitutifs</div>
         <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
-            <thead><tr style={{background:T.mid}}>{["Element","Unite","Qte","MO/j","Rdt","Materiaux","Materiel","DS/u","PV/u"].map(function(h){return <th key={h} style={{padding:"6px 8px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:10}}>{h}</th>;})}</tr></thead>
-            <tbody>{result.map(function(t,i){var c=calcTache(t,cfg2.tc,cfg2);return <tr key={i} style={{background:i%2===0?T.mid+"88":"transparent",borderBottom:"1px solid "+T.border+"44"}}><td style={{padding:"6px 8px",fontWeight:600,fontSize:11}}>{t.libelle}</td><td style={{padding:"6px 8px",color:T.muted,textAlign:"center"}}>{t.unite}</td><td style={{padding:"6px 8px",textAlign:"center"}}>{t.quantite}</td><td style={{padding:"6px 8px",textAlign:"right",color:T.secondary}}>{fmtS(t.salaire)}</td><td style={{padding:"6px 8px",textAlign:"center"}}>{t.rendement}</td><td style={{padding:"6px 8px",textAlign:"right",color:T.primary}}>{fmtS(t.materiau)}</td><td style={{padding:"6px 8px",textAlign:"right",color:T.warning}}>{fmtS(t.materiel)}</td><td style={{padding:"6px 8px",textAlign:"right",color:T.white,fontWeight:600}}>{fmtS(Math.round(c.ds))}</td><td style={{padding:"6px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(c.pv))}</td></tr>;})}
-            <tr style={{background:T.primary+"22",borderTop:"2px solid "+T.primary+"55"}}><td colSpan={7} style={{padding:"8px",fontWeight:800,color:T.primary}}>TOTAL</td><td style={{padding:"8px",textAlign:"right",fontWeight:800,color:T.warning}}>{fmtS(Math.round(totDS))}</td><td style={{padding:"8px",textAlign:"right",fontWeight:800,color:T.success}}>{fmtS(Math.round(totPV))}</td></tr>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:700}}>
+            <thead><tr style={{background:T.mid}}>{["Désignation","Unité","Qte","Type ouvrier","Nb ouv.","MO/j","Rdt","Matériaux/u","Matériel/u","DS/u","PV/u"].map(function(h){return <th key={h} style={{padding:"7px 8px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:10,whiteSpace:"nowrap"}}>{h}</th>;})}</tr></thead>
+            <tbody>
+              {items.map(function(t,i){
+                var c=calcTache(t,cfg2.tc,cfg2);
+                var catColor=t.categorie==="MO"?T.secondary:t.categorie==="Materiaux"?T.primary:t.categorie==="Materiel"?T.warning:T.success;
+                return <tr key={i} style={{background:i%2===0?T.mid+"88":"transparent",borderBottom:"1px solid "+T.border+"44"}}>
+                  <td style={{padding:"6px 8px",fontWeight:600}}><span style={{background:catColor+"22",color:catColor,borderRadius:4,padding:"1px 5px",fontSize:9,marginRight:4}}>{t.categorie}</span>{t.libelle}</td>
+                  <td style={{padding:"6px 8px",color:T.muted,textAlign:"center"}}>{t.unite}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",fontWeight:600}}>{t.quantite}</td>
+                  <td style={{padding:"6px 8px",color:T.muted,fontSize:10}}>{t.typeOuvrier||"-"}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center",color:T.secondary}}>{t.nbOuvriers||1}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:T.secondary}}>{fmtS(t.salaire)}</td>
+                  <td style={{padding:"6px 8px",textAlign:"center"}}>{t.rendement}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:T.primary}}>{fmtS(t.materiau)}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:T.warning}}>{fmtS(t.materiel)}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:T.white,fontWeight:700}}>{fmtS(Math.round(c.ds))}</td>
+                  <td style={{padding:"6px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(c.pv))}</td>
+                </tr>;
+              })}
+              <tr style={{background:T.primary+"22",borderTop:"2px solid "+T.primary+"55"}}>
+                <td colSpan={9} style={{padding:"8px",fontWeight:800,color:T.primary}}>TOTAL DÉBOURSÉ SEC</td>
+                <td style={{padding:"8px",textAlign:"right",fontWeight:800,color:T.white,fontSize:13}}>{fmtS(Math.round(totDS))}</td>
+                <td style={{padding:"8px",textAlign:"right",fontWeight:800,color:T.success,fontSize:13}}>{fmtS(Math.round(totPV))}</td>
+              </tr>
             </tbody>
           </table>
+        </div>
+        {/* Récapitulatif global — Étape 4 */}
+        <div style={{fontWeight:700,fontSize:13,color:T.primary,borderBottom:"1px solid "+T.border,paddingBottom:6,marginTop:4}}>📊 Récapitulatif global (Étape 4)</div>
+        <div style={{background:T.mid,borderRadius:10,padding:"14px 16px"}}>
+          {[["🧱 Total matériaux",Math.round(result.totMat),T.primary],["👷 Total main d'œuvre",Math.round(result.totMO),T.secondary],["⚙️ Total matériel",Math.round(result.totMateriel),T.warning],["🔗 Total sous-traitance",Math.round(result.totST),"#A855F7"]].map(function(r,i){return r[1]>0?<div key={i} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid "+T.border+"44",fontSize:13}}><span style={{color:T.muted}}>{r[0]}</span><span style={{fontWeight:700,color:r[2]}}>{fmt(r[1])}</span></div>:null;})}
+          <div style={{display:"flex",justifyContent:"space-between",padding:"10px 0 6px",fontSize:14,borderTop:"2px solid "+T.primary+"44",marginTop:4}}><span style={{fontWeight:800,color:T.primary}}>🔨 TOTAL DÉBOURSÉ SEC</span><span style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(Math.round(totDS))}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:13}}><span style={{color:T.muted}}>📐 DS unitaire</span><span style={{fontWeight:700,color:T.white}}>{fmt(Math.round(totDSU))}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:13}}><span style={{color:T.muted}}>💰 Prix de vente HT (avec FG+bénéf.)</span><span style={{fontWeight:700,color:T.success}}>{fmt(Math.round(totPV))}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:13}}><span style={{color:T.muted}}>📈 Marge brute estimée</span><span style={{fontWeight:700,color:T.success}}>{totPV>0?Math.round((totPV-totDS)/totPV*100):0}%</span></div>
         </div>
         {!done?<div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
           <div style={{flex:1,minWidth:200}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Importer dans la session</label><select value={selSess} onChange={function(e){setSelSess(e.target.value);}} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 12px",color:T.white,fontSize:14,outline:"none"}}><option value="">-- Choisir une session --</option>{sessions.map(function(s){return <option key={s.id} value={s.id}>{s.nom}</option>;})}</select></div>
           <button onClick={importToSession} disabled={!selSess||importing} style={{background:selSess?T.success:T.mid,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:selSess?"pointer":"not-allowed",fontSize:13}}>{importing?"Import...":"✅ Importer"}</button>
-        </div>:<div style={{background:T.success+"22",border:"1px solid "+T.success+"44",borderRadius:10,padding:"12px 16px",fontWeight:700,color:T.success,textAlign:"center"}}>✅ {result.length} éléments importés avec succès !</div>}
+        </div>:<div style={{background:T.success+"22",border:"1px solid "+T.success+"44",borderRadius:10,padding:"12px 16px",fontWeight:700,color:T.success,textAlign:"center"}}>✅ {items.length} éléments importés avec succès !</div>}
       </div>}
     </div>
   </Modal>;
