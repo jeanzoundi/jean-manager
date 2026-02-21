@@ -340,44 +340,20 @@ function IAOuvrageModal(p){
     if(!query.trim())return;
     setLoading(true);setErr(null);setResult(null);setDone(false);
     try{
-      var prompt="Tu es Expert BTP Senior Cote d'Ivoire / Afrique de l'Ouest, specialiste en estimation et debours sec.\n"
-        +"Ouvrage a decomposen: "+query+"\n\n"
-        +"=== ETAPE 1 — ANALYSE DE L'OUVRAGE ===\n"
-        +"Identifier: nature (terrassement/fondation/elevation/plomberie/electricite/finition...), sous-composants necessaires.\n\n"
-        +"=== ETAPE 2 — DECOMPOSITION EN ELEMENTS CONSTITUTIFS ===\n"
-        +"Pour chaque element, respecter:\n"
-        +"MATERIAUX: dosages beton realistes, consommation acier coherente, rendement agglos/m2, pertes chantier 5-10%\n"
-        +"MAIN D'OEUVRE: type ouvrier (macon/ferrailleur/coffreur/manoeuvre), rendement journalier realiste, nb ouvriers, cout journalier local XOF\n"
-        +"MATERIEL: location pelle, betonniere, vibrateur, camion, echafaudage si necessaire\n"
-        +"SOUS-TRAITANCE: si applicable\n\n"
-        +"=== ETAPE 3 — VERIFICATIONS TECHNIQUES ===\n"
-        +"Verifier: coherence rendements, coherence volumes, logique chantier, ordre execution, realisme economique Afrique de l'Ouest\n\n"
-        +"=== FORMAT DE REPONSE — CSV PIPE OBLIGATOIRE ===\n"
-        +"Reponds en lignes CSV pipe, UNE LIGNE PAR ELEMENT CONSTITUTIF:\n"
-        +"LIBELLE|UNITE|QUANTITE|SALAIRE_J|RENDEMENT|MATERIAUX_U|MATERIEL_U|SOUS_TRAITANCE_U|CATEGORIE|TYPE_OUVRIER|NB_OUVRIERS\n"
-        +"Regles strictes:\n"
-        +"- LIBELLE: designation precise de l element (ex: Beton de fondation C20/25, Ferraillage semelle HA12, Coffrage bois perdu)\n"
-        +"- UNITE: m2/ml/m3/U/h/j/kg/t/forfait\n"
-        +"- QUANTITE: quantite reelle pour l ouvrage decrit (pas toujours 1)\n"
-        +"- SALAIRE_J: salaire journalier ouvrier en XOF (macon=6000-8000, ferrailleur=7000-9000, manoeuvre=4000-5000)\n"
-        +"- RENDEMENT: unites produites par journee par ouvrier (ex: macon=2m3 beton, ferrailleur=80kg/j)\n"
-        +"- MATERIAUX_U: cout total materiaux par unite en XOF (inclure pertes)\n"
-        +"- MATERIEL_U: cout location materiel par unite en XOF\n"
-        +"- SOUS_TRAITANCE_U: 0 si fait en regie\n"
-        +"- CATEGORIE: Materiaux/MO/Materiel/Sous-traitance/Mixte\n"
-        +"- TYPE_OUVRIER: macon/ferrailleur/coffreur/manoeuvre/conducteur/electricien/plombier\n"
-        +"- NB_OUVRIERS: nombre d ouvriers necessaires (integer)\n"
-        +"Exemples realistes Cote d'Ivoire:\n"
-        +"Fouille mecanique en rigole|m3|10|0|0|0|12000|0|Materiel|conducteur engin|1\n"
-        +"Beton de proprete C10 ep5cm|m3|0.5|5000|1.5|85000|8000|0|Mixte|macon|2\n"
-        +"Ferraillage semelle HA10-12|kg|120|7500|80|680|0|0|MO|ferrailleur|2\n"
-        +"Coffrage bois perdu semelle|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
-        +"Beton arme C25/30 semelle|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
-        +"Commence DIRECTEMENT par les lignes CSV sans introduction ni commentaire.";
+      var prompt="Expert BTP Cote d'Ivoire. Decompose cet ouvrage: "+query+"\n\n"
+        +"Reponds UNIQUEMENT en lignes CSV pipe (pas d'intro, pas de commentaire):\n"
+        +"LIBELLE|UNITE|QTE|SALAIRE_J|RENDEMENT|MATERIAUX_U|MATERIEL_U|ST_U|CATEGORIE|TYPE_OUVRIER|NB\n"
+        +"Exemples:\n"
+        +"Fouille mecanique|m3|10|0|0|0|12000|0|Materiel|conducteur|1\n"
+        +"Beton proprete C10|m3|0.5|5000|1.5|85000|8000|0|Mixte|macon|2\n"
+        +"Ferraillage HA12|kg|120|7500|80|680|0|0|MO|ferrailleur|2\n"
+        +"Coffrage bois|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
+        +"Beton arme C25|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
+        +"Max 15 lignes. Commence directement.";
       var data=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:prompt}]});
-      var txt=(data.content||[]).map(function(i){return i.text||"";}).join("");
-      // Parser CSV pipe
-      var lines=txt.trim().split("\n").filter(function(l){return l.indexOf("|")>=0;});
+      var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").trim();
+      // Parser CSV pipe — robuste
+      var lines=txt.split("\n").map(function(l){return l.trim();}).filter(function(l){return l.indexOf("|")>=2&&l.length>5;});
       var items=[];
       lines.forEach(function(line){
         line=line.trim();
