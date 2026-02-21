@@ -316,6 +316,26 @@ function IAOuvrageModal(p){
   var _imp=useState(false),importing=_imp[0],setImporting=_imp[1];
   var _done=useState(false),done=_done[0],setDone=_done[1];
 
+  async function callWithRetry(body, maxRetries=4){
+    for(var attempt=1;attempt<=maxRetries;attempt++){
+      var r=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if(r.ok)return r.json();
+      var errText=await r.text();
+      if(r.status===529||r.status===503||r.status===500){
+        if(attempt<maxRetries){
+          var delay=attempt*4000;
+          setErr("⏳ Serveurs surchargés — nouvelle tentative "+attempt+"/"+maxRetries+" dans "+(delay/1000)+"s...");
+          await new Promise(function(res){setTimeout(res,delay);});
+          setErr(null);
+        } else throw new Error("Serveurs surchargés après "+maxRetries+" tentatives — réessayez dans 1-2 min");
+      } else throw new Error("API "+r.status+": "+errText.slice(0,150));
+    }
+  }
+
   async function analyze(){
     if(!query.trim())return;
     setLoading(true);setErr(null);setResult(null);setDone(false);
@@ -354,9 +374,7 @@ function IAOuvrageModal(p){
         +"Coffrage bois perdu semelle|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
         +"Beton arme C25/30 semelle|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
         +"Commence DIRECTEMENT par les lignes CSV sans introduction ni commentaire.";
-      var resp=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:prompt}]})});
-      if(!resp.ok)throw new Error("API "+resp.status);
-      var data=await resp.json();
+      var data=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:prompt}]});
       var txt=(data.content||[]).map(function(i){return i.text||"";}).join("");
       // Parser CSV pipe
       var lines=txt.trim().split("\n").filter(function(l){return l.indexOf("|")>=0;});
@@ -509,10 +527,13 @@ function SessionDetail(p){
   function delTache(id){q("debourse_taches").eq("id",id).del().then(function(){reload();});}
   function saveTache(){if(!tForm.libelle)return;setSaving(true);var c=calcTache(tForm,cfg.tc,cfg);q("debourse_taches").insert({session_id:sess.id,libelle:tForm.libelle,unite:tForm.unite,quantite:parseFloat(tForm.quantite)||0,salaire:parseFloat(tForm.salaire)||0,rendement:parseFloat(tForm.rendement)||1,materiau:parseFloat(tForm.materiau)||0,materiel:parseFloat(tForm.materiel)||0,sous_traitance:parseFloat(tForm.sous_traitance)||0,main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)}).then(function(){setSaving(false);setShowNew(false);setTForm({libelle:"",unite:"U",quantite:0,salaire:0,rendement:1,materiau:0,materiel:0,sous_traitance:0});reload();});}
 
-  async function callAI(messages,maxTok){
-    var r=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:maxTok||1000,messages:messages})});
-    if(!r.ok){var e=await r.text();throw new Error("API "+r.status+": "+e.slice(0,200));}
-    var d=await r.json();return(d.content||[]).map(function(i){return i.text||"";}).join("");
+  async function callAI(messages,maxTok,retries=4){
+    for(var attempt=1;attempt<=retries;attempt++){
+      var r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:maxTok||1000,messages:messages})});
+      if(r.ok){var d=await r.json();return(d.content||[]).map(function(i){return i.text||"";}).join("");}
+      if((r.status===529||r.status===503)&&attempt<retries){await new Promise(function(res){setTimeout(res,attempt*4000);});}
+      else{var e=await r.text();throw new Error("API "+r.status+": "+e.slice(0,200));}
+    }
   }
 
   async function handleFile(file){
@@ -562,9 +583,7 @@ function SessionDetail(p){
         var b64=await new Promise(function(res,rej){var rr=new FileReader();rr.onload=function(e){res(e.target.result.split(",")[1]);};rr.onerror=rej;rr.readAsDataURL(file);});
         var cb=isPDF?{type:"document",source:{type:"base64",media_type:file.type,data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
         var pp2="Expert BTP Cote d'Ivoire. Extrais TOUTES les taches de ce document. Reponds en lignes CSV pipe:\nLIBELLE|QUANTITE|UNITE|PRIX_UNITAIRE|MONTANT_TOTAL|MO|MATERIAUX|MATERIEL|SOUS_TRAITANCE\nIgnore totaux/TVA. Commence directement par les lignes.";
-        var rr2=await fetch("/api/claude",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:[cb,{type:"text",text:pp2}]}]})});
-        if(!rr2.ok)throw new Error("API "+rr2.status);
-        var dd=await rr2.json();
+        var dd=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:[cb,{type:"text",text:pp2}]}]});
         var tt=(dd.content||[]).map(function(i){return i.text||"";}).join("");
         tt.trim().split("\n").forEach(function(line){
           line=line.trim();if(!line||line.indexOf("|")<0)return;
