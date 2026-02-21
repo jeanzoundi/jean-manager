@@ -5,7 +5,7 @@ const SUPA_URL = "https://mbkwpaxissvvjhewkggl.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ia3dwYXhpc3N2dmpoZXdrZ2dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MjQzOTMsImV4cCI6MjA4NzAwMDM5M30.Zo9aJVDByO8aVSADfSCc2m4jCI1qeXuWYQgVRT-a3LA";
 const HDR = { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: "Bearer " + SUPA_KEY };
 const REST = SUPA_URL + "/rest/v1";
-const AI_URL = "https://api.anthropic.com/v1/messages";
+const AI_URL = "/api/claude";
 const AI_MODEL = "claude-sonnet-4-20250514";
 
 // ── SUPABASE QUERY BUILDER ────────────────────────────────────────────────────
@@ -27,14 +27,20 @@ function q(table){
 async function aiCall(body, maxRetries){
   maxRetries = maxRetries||4;
   for(var attempt=1;attempt<=maxRetries;attempt++){
-    var r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(r.ok)return r.json();
-    var et=await r.text();
-    if((r.status===529||r.status===503||r.status===500)&&attempt<maxRetries){
-      await new Promise(function(res){setTimeout(res,attempt*4000);});
-    } else throw new Error("API "+r.status+": "+et.slice(0,150));
+    try{
+      var r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      if(r.ok)return r.json();
+      var et=await r.text();
+      if((r.status===529||r.status===503||r.status===500||r.status===529)&&attempt<maxRetries){
+        await new Promise(function(res){setTimeout(res,attempt*4000);});
+      } else throw new Error("API "+r.status+": "+et.slice(0,150));
+    }catch(e){
+      if(attempt<maxRetries&&(e.message.indexOf("fetch")>=0||e.message.indexOf("network")>=0)){
+        await new Promise(function(res){setTimeout(res,attempt*3000);});
+      } else throw e;
+    }
   }
-  throw new Error("Serveurs surchargés — réessayez dans 1-2 min");
+  throw new Error("Echec apres "+maxRetries+" tentatives");
 }
 async function aiText(messages, maxTok, retries){
   var d=await aiCall({model:AI_MODEL,max_tokens:maxTok||1000,messages:messages},retries);
@@ -639,22 +645,40 @@ function DepensesIntv(p){
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
   var deps=intv.depenses||[];
   var total=deps.reduce(function(a,d){return a+d.montant;},0);
-  function resetForm(){setEditDep(null);setForm({libelle:"",montant:"",date:today()});}
-  function startEdit(d){setEditDep(d);setForm({libelle:d.libelle||"",montant:String(d.montant||""),date:d.date||today()});setOpen(true);}
+  var _err=useState(null),saveErr=_err[0],setSaveErr=_err[1];
+
+  function resetForm(){setEditDep(null);setForm({libelle:"",montant:"",date:today()});setSaveErr(null);}
+  function startEdit(d){setEditDep(d);setForm({libelle:d.libelle||"",montant:String(d.montant||""),date:d.date||today()});setOpen(true);setSaveErr(null);}
   function upF(k,v){setForm(function(pp){var n=Object.assign({},pp);n[k]=v;return n;});}
   function save(){
     if(!form.libelle||!form.montant)return;
-    setSaving(true);
+    setSaving(true);setSaveErr(null);
     var payload={libelle:form.libelle,montant:parseFloat(form.montant)||0,date:form.date};
     var op=editDep
       ?q("intervention_depenses").eq("id",editDep.id).update(payload)
-      :q("intervention_depenses").insert(Object.assign({},payload,{intervention_id:String(intv.id)||""}));
+      :q("intervention_depenses").insert(Object.assign({},payload,{intervention_id:intv.id}));
     op.then(function(r){
-      if(r&&r.error){console.error(r.error);setSaving(false);return;}
+      console.log("save dep result:", JSON.stringify(r));
+      if(r&&r.error){
+        console.error("save dep error:", r.error);
+        setSaveErr(JSON.stringify(r.error));
+        setSaving(false);
+        return;
+      }
       setSaving(false);setOpen(false);resetForm();reload();
+    }).catch(function(e){
+      console.error("save dep catch:", e);
+      setSaveErr(e.message);
+      setSaving(false);
     });
   }
-  function del(id){if(!window.confirm("Supprimer ?"))return;q("intervention_depenses").eq("id",id).del().then(function(){reload();});}
+  function del(id){
+    if(!window.confirm("Supprimer ?"))return;
+    q("intervention_depenses").eq("id",id).del().then(function(r){
+      if(r&&r.error){console.error("del dep error:",r.error);return;}
+      reload();
+    });
+  }
   return <div style={{background:T.mid,borderRadius:8,padding:"10px 12px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div><div style={{fontSize:10,color:T.muted}}>Coût total</div><div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(total)}</div></div>
@@ -669,6 +693,7 @@ function DepensesIntv(p){
       </div>;})}
       <div style={{background:T.card,borderRadius:8,padding:"10px 12px",border:"1px solid "+T.border,marginTop:4}}>
         <div style={{fontWeight:600,fontSize:12,marginBottom:8,color:editDep?T.warning:T.primary}}>{editDep?"✏️ Modifier":"+ Nouvelle dépense"}</div>
+        {saveErr&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:6,padding:"6px 10px",fontSize:11,color:T.danger,marginBottom:8}}>⚠️ {saveErr}</div>}
         <FG cols={2}>
           <FF label="Libellé *" value={form.libelle} onChange={function(v){upF("libelle",v);}} full T={T}/>
           <FF label="Montant (XOF) *" type="number" value={form.montant} onChange={function(v){upF("montant",v);}} T={T}/>
