@@ -476,7 +476,35 @@ function AnalyseDocModal(p){
   var _vals=useState({}),vals=_vals[0],setVals=_vals[1];
   var fileRef=useRef();
 
-  // Chaque poste = { id, libelle, elements:[{id,libelle,formule,unite,vars:[{nom,label,valeur}]}] }
+  // Parser JSON robuste — répare les JSON tronqués
+  function safeParseJSON(txt){
+    // Essai direct
+    try{var jm=txt.match(/\{[\s\S]*\}/);if(jm)return JSON.parse(jm[0]);}catch(e){}
+    // Répare JSON tronqué en fermant les structures ouvertes
+    try{
+      var jm2=txt.match(/\{[\s\S]*/);
+      if(!jm2)return null;
+      var s=jm2[0];
+      // Compter les accolades et crochets ouverts
+      var opens=0,openb=0,inStr=false,esc=false;
+      for(var i=0;i<s.length;i++){
+        var c=s[i];
+        if(esc){esc=false;continue;}
+        if(c==="\\"&&inStr){esc=true;continue;}
+        if(c==='"'){inStr=!inStr;continue;}
+        if(inStr)continue;
+        if(c==='{')opens++;else if(c==='}')opens--;
+        else if(c==='[')openb++;else if(c===']')openb--;
+      }
+      // Fermer proprement
+      if(inStr)s+='"';
+      // Supprimer dernière virgule pendante
+      s=s.replace(/,\s*$/,"");
+      for(var j=0;j<openb;j++)s+="]";
+      for(var k=0;k<opens;k++)s+="}";
+      return JSON.parse(s);
+    }catch(e){return null;}
+  }
   async function analyseDoc(file){
     setLoading(true);setErr(null);setPostes([]);setVals({});
     try{
@@ -504,11 +532,11 @@ function AnalyseDocModal(p){
       var promptPostes="Expert BTP CI. Identifie les postes principaux de ce document BTP.\n"
         +"Réponds UNIQUEMENT en JSON: {\"postes\":[{\"libelle\":\"Fouilles en rigole\",\"unite\":\"m3\"},{\"libelle\":\"Béton de propreté\",\"unite\":\"m3\"}]}\n"
         +"Max 10 postes. JSON pur.\nDOCUMENT:\n"+texte.slice(0,3000);
-      var d2=await aiCall({model:AI_MODEL,max_tokens:1000,messages:[{role:"user",content:promptPostes}]});
+      var d2=await aiCall({model:AI_MODEL,max_tokens:1500,messages:[{role:"user",content:promptPostes}]});
       var txt2=(d2.content||[]).map(function(i){return i.text||"";}).join("");
-      var jm2=txt2.match(/\{[\s\S]*\}/);
-      if(!jm2)throw new Error("Impossible d'identifier les postes");
-      var postesBase=JSON.parse(jm2[0]).postes||[];
+      var parsed2=safeParseJSON(txt2);
+      if(!parsed2)throw new Error("Impossible d'identifier les postes");
+      var postesBase=parsed2.postes||[];
       if(!postesBase.length)throw new Error("Aucun poste trouvé dans le document");
 
       // Décomposer chaque poste un par un
@@ -522,10 +550,10 @@ function AnalyseDocModal(p){
           +"{\"elements\":[{\"libelle\":\"Main d'oeuvre\",\"categorie\":\"MO\",\"formule\":\"nb_ouvriers*salaire_j/rendement_j\",\"description\":\"(nb ouvriers × salaire/j) ÷ rendement\",\"vars\":[{\"nom\":\"nb_ouvriers\",\"label\":\"Nb ouvriers\",\"valeur\":3,\"unite\":\"ouvriers\"},{\"nom\":\"salaire_j\",\"label\":\"Salaire/jour\",\"valeur\":5000,\"unite\":\"XOF/j\"},{\"nom\":\"rendement_j\",\"label\":\"Rendement/jour\",\"valeur\":4,\"unite\":\"m3/j\"}]}]}\n"
           +"Règles: 2-4 éléments max, valeurs réalistes XOF CI, formules simples avec noms vars exacts, JSON pur.";
         try{
-          var de=await aiCall({model:AI_MODEL,max_tokens:2000,messages:[{role:"user",content:promptEl}]});
+          var de=await aiCall({model:AI_MODEL,max_tokens:2500,messages:[{role:"user",content:promptEl}]});
           var txte=(de.content||[]).map(function(i){return i.text||"";}).join("");
-          var jme=txte.match(/\{[\s\S]*\}/);
-          var elements=jme?JSON.parse(jme[0]).elements||[]:[];
+          var parsedEl=safeParseJSON(txte);
+          var elements=parsedEl?parsedEl.elements||[]:[];
           ps.push({libelle:pb.libelle,unite:pb.unite||"U",elements:elements});
         }catch(e){
           ps.push({libelle:pb.libelle,unite:pb.unite||"U",elements:[]});
