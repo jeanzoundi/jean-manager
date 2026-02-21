@@ -310,6 +310,7 @@ function Debourse(p){
   var _s=useState(null),selSid=_s[0],setSelSid=_s[1];
   var _n=useState(false),showNewS=_n[0],setShowNewS=_n[1];
   var _ia=useState(false),showIA=_ia[0],setShowIA=_ia[1];
+  var _ad=useState(false),showAD=_ad[0],setShowAD=_ad[1];
   var _f=useState({nom:"",chantier_id:"",taux_charges:40,coeff_fg:15,coeff_benef:10}),sForm=_f[0],setSForm=_f[1];
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
   var selSess=sessions.find(function(s){return s.id===selSid;});
@@ -318,7 +319,7 @@ function Debourse(p){
   function delSession(id){if(!window.confirm("Supprimer ?"))return;q("debourse_taches").eq("session_id",id).del().then(function(){q("debourse_sessions").eq("id",id).del().then(function(){setSelSid(null);reload();});});}
   function updateCfg(k,v){if(!selSid)return;q("debourse_sessions").eq("id",selSid).update({[k]:parseFloat(v)||0}).then(function(){reload();});}
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
-    <Card title="Sessions de debours" action={<div style={{display:"flex",gap:6}}><button onClick={function(){setShowIA(true);}} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>🤖 IA Ouvrage</button><button onClick={function(){setShowNewS(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button></div>} T={T}>
+    <Card title="Sessions de debours" action={<div style={{display:"flex",gap:6}}><button onClick={function(){setShowAD(true);}} style={{background:"#A855F722",color:"#A855F7",border:"1px solid #A855F744",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>📂 Analyser doc</button><button onClick={function(){setShowIA(true);}} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>🤖 IA Ouvrage</button><button onClick={function(){setShowNewS(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button></div>} T={T}>
       {sessions.length===0?<Empty msg="Aucune session — creez-en une" icon="🔢"/>:<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
         {sessions.map(function(s){var sts=taches.filter(function(t){return t.session_id===s.id;});var tot=sts.reduce(function(a,t){return a+(t.prix_vente_total||0);},0);var active=selSid===s.id;return <div key={s.id} onClick={function(){setSelSid(s.id);}} style={{background:active?T.primary+"22":T.mid,border:"2px solid "+(active?T.primary:T.border),borderRadius:10,padding:"12px 16px",cursor:"pointer",minWidth:180,flexShrink:0}}><div style={{fontWeight:700,fontSize:13,color:active?T.primary:T.white}}>{s.nom}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{sts.length} tache(s)</div><div style={{fontSize:13,fontWeight:700,color:T.success,marginTop:4}}>{fmtS(tot)} XOF</div><button onClick={function(e){e.stopPropagation();delSession(s.id);}} style={{marginTop:8,background:T.danger+"22",border:"none",color:T.danger,borderRadius:6,padding:"3px 8px",fontSize:10,cursor:"pointer"}}>Supprimer</button></div>;})}
       </div>}
@@ -326,6 +327,7 @@ function Debourse(p){
     {selSess&&<SessionDetail sess={selSess} taches={selTaches} reload={reload} T={T} isMobile={isMobile} updateCfg={updateCfg} ch={ch}/>}
     {showNewS&&<Modal title="Nouvelle session" onClose={function(){setShowNewS(false);}} onSave={saveSession} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Nom *" value={sForm.nom} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{nom:v});});}} full T={T}/><FS label="Chantier" value={sForm.chantier_id} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{chantier_id:v});});}} options={[["","- Aucun -"]].concat(ch.map(function(c){return[c.id,c.nom];}))  } full T={T}/><FF label="Charges (%)" type="number" value={sForm.taux_charges} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{taux_charges:v});});}} T={T}/><FF label="FG (%)" type="number" value={sForm.coeff_fg} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{coeff_fg:v});});}} T={T}/><FF label="Benefice (%)" type="number" value={sForm.coeff_benef} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{coeff_benef:v});});}} T={T}/></FG>}</Modal>}
     {showIA&&<IAOuvrageModal onClose={function(){setShowIA(false);}} sessions={sessions} reload={reload} T={T}/>}
+    {showAD&&<AnalyseDocModal onClose={function(){setShowAD(false);}} T={T}/>}
   </div>;
 }
 
@@ -459,6 +461,222 @@ function IAOuvrageModal(p){
           <div style={{flex:1,minWidth:200}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Importer dans la session</label><select value={selSess} onChange={function(e){setSelSess(e.target.value);}} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 12px",color:T.white,fontSize:14,outline:"none"}}><option value="">-- Choisir --</option>{sessions.map(function(s){return <option key={s.id} value={s.id}>{s.nom}</option>;})}</select></div>
           <button onClick={importToSession} disabled={!selSess||importing} style={{background:selSess?T.success:T.mid,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:selSess?"pointer":"not-allowed",fontSize:13}}>{importing?"Import...":"✅ Importer"}</button>
         </div>:<div style={{background:T.success+"22",border:"1px solid "+T.success+"44",borderRadius:10,padding:"12px",fontWeight:700,color:T.success,textAlign:"center"}}>✅ {items.length} éléments importés !</div>}
+      </div>}
+    </div>
+  </Modal>;
+}
+
+// ── ANALYSE DOCUMENT INTELLIGENTE ────────────────────────────────────────────
+function AnalyseDocModal(p){
+  var onClose=p.onClose,T=p.T;
+  var _l=useState(false),loading=_l[0],setLoading=_l[1];
+  var _e=useState(null),err=_e[0],setErr=_e[1];
+  var _msg=useState(""),msg=_msg[0],setMsg=_msg[1];
+  var _postes=useState([]),postes=_postes[0],setPostes=_postes[1];
+  var _vals=useState({}),vals=_vals[0],setVals=_vals[1];
+  var fileRef=useRef();
+
+  // Chaque poste = { id, libelle, elements:[{id,libelle,formule,unite,vars:[{nom,label,valeur}]}] }
+  async function analyseDoc(file){
+    setLoading(true);setErr(null);setPostes([]);setVals({});
+    try{
+      setMsg("📄 Lecture du document...");
+      var isPDF=file.type==="application/pdf";
+      var isImg=file.type.indexOf("image/")===0;
+      var isExcel=file.name.match(/\.(xlsx|xls)$/i);
+      var texte="";
+      if(isPDF||isImg){
+        var b64=await new Promise(function(res,rej){var r=new FileReader();r.onload=function(e){res(e.target.result.split(",")[1]);};r.onerror=rej;r.readAsDataURL(file);});
+        var cb=isPDF?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
+        var d=await aiCall({model:AI_MODEL,max_tokens:4000,messages:[{role:"user",content:[cb,{type:"text",text:"Extrais le texte brut de ce document BTP. Retourne uniquement le contenu texte."}]}]});
+        texte=(d.content||[]).map(function(i){return i.text||"";}).join("");
+      } else if(isExcel){
+        var SheetJS=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+        var buf=await file.arrayBuffer();
+        var wb=SheetJS.read(buf,{type:"array"});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        texte=SheetJS.utils.sheet_to_csv(ws);
+      } else {
+        texte=await file.text();
+      }
+      setMsg("🤖 Analyse et décomposition des postes...");
+      var prompt="Tu es Expert BTP Côte d'Ivoire. Analyse ce document BTP et décompose CHAQUE POSTE en éléments constitutifs avec notes de calcul.\n\n"
+        +"DOCUMENT:\n"+texte.slice(0,6000)+"\n\n"
+        +"Pour chaque poste identifié, génère sa décomposition COMPLÈTE.\n"
+        +"Réponds UNIQUEMENT en JSON valide, format strict:\n"
+        +"{\n"
+        +"  \"postes\": [\n"
+        +"    {\n"
+        +"      \"libelle\": \"Fouilles en rigole\",\n"
+        +"      \"unite\": \"m3\",\n"
+        +"      \"elements\": [\n"
+        +"        {\n"
+        +"          \"libelle\": \"Main d'oeuvre fouille\",\n"
+        +"          \"categorie\": \"MO\",\n"
+        +"          \"formule\": \"(nb_ouvriers * salaire_j) / rendement_j\",\n"
+        +"          \"description\": \"Coût MO par m3 = (nb ouvriers × salaire journalier) ÷ rendement journalier\",\n"
+        +"          \"vars\": [\n"
+        +"            {\"nom\":\"nb_ouvriers\",\"label\":\"Nombre d'ouvriers\",\"valeur\":3,\"unite\":\"ouvriers\"},\n"
+        +"            {\"nom\":\"salaire_j\",\"label\":\"Salaire journalier\",\"valeur\":5000,\"unite\":\"XOF/j\"},\n"
+        +"            {\"nom\":\"rendement_j\",\"label\":\"Rendement journalier\",\"valeur\":4,\"unite\":\"m3/j\"}\n"
+        +"          ]\n"
+        +"        },\n"
+        +"        {\n"
+        +"          \"libelle\": \"Location pelle mécanique\",\n"
+        +"          \"categorie\": \"Materiel\",\n"
+        +"          \"formule\": \"cout_location_j / rendement_pelle\",\n"
+        +"          \"description\": \"Coût matériel par m3 = location journalière ÷ rendement pelle\",\n"
+        +"          \"vars\": [\n"
+        +"            {\"nom\":\"cout_location_j\",\"label\":\"Location pelle/jour\",\"valeur\":80000,\"unite\":\"XOF/j\"},\n"
+        +"            {\"nom\":\"rendement_pelle\",\"label\":\"Rendement pelle\",\"valeur\":40,\"unite\":\"m3/j\"}\n"
+        +"          ]\n"
+        +"        }\n"
+        +"      ]\n"
+        +"    }\n"
+        +"  ]\n"
+        +"}\n"
+        +"Règles:\n"
+        +"- Formules avec noms de variables EXACTEMENT comme dans vars[].nom\n"
+        +"- Valeurs réalistes Côte d'Ivoire (XOF)\n"
+        +"- 2 à 6 éléments par poste (MO, Matériaux, Matériel, Transport, etc.)\n"
+        +"- JSON pur, aucun texte avant ou après";
+      var d2=await aiCall({model:AI_MODEL,max_tokens:6000,messages:[{role:"user",content:prompt}]});
+      var txt=(d2.content||[]).map(function(i){return i.text||"";}).join("");
+      var jm=txt.match(/\{[\s\S]*\}/);
+      if(!jm)throw new Error("Réponse IA invalide");
+      var parsed=JSON.parse(jm[0]);
+      var ps=(parsed.postes||[]).map(function(po,pi){
+        var initVals={};
+        (po.elements||[]).forEach(function(el,ei){
+          (el.vars||[]).forEach(function(v){
+            initVals["p"+pi+"_e"+ei+"_"+v.nom]=v.valeur;
+          });
+        });
+        return po;
+      });
+      // Init vals
+      var iv={};
+      ps.forEach(function(po,pi){
+        (po.elements||[]).forEach(function(el,ei){
+          (el.vars||[]).forEach(function(v){
+            iv["p"+pi+"_e"+ei+"_"+v.nom]=v.valeur;
+          });
+        });
+      });
+      setPostes(ps);setVals(iv);
+      setMsg("");
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  }
+
+  function evalFormule(formule,vars,valsMap,pi,ei){
+    try{
+      var scope={};
+      (vars||[]).forEach(function(v){
+        scope[v.nom]=parseFloat(valsMap["p"+pi+"_e"+ei+"_"+v.nom])||0;
+      });
+      // Évaluation sécurisée
+      var fn=new Function(...Object.keys(scope),"return ("+formule+")");
+      var res=fn(...Object.values(scope));
+      return isFinite(res)?Math.round(res*100)/100:0;
+    }catch(e){return 0;}
+  }
+
+  function setVal(key,v){setVals(function(pp){var n=Object.assign({},pp);n[key]=v;return n;});}
+
+  var catColor={"MO":T.secondary,"Materiaux":T.primary,"Materiel":T.warning,"Transport":T.success,"Sous-traitance":"#A855F7","Divers":T.muted};
+
+  return <Modal title="🤖 IA — Analyse & Décomposition de document" onClose={onClose} T={T}>
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* Zone import */}
+      <div style={{background:T.mid,borderRadius:12,padding:20,textAlign:"center",border:"2px dashed "+T.border}}>
+        <div style={{fontSize:32,marginBottom:8}}>📂</div>
+        <div style={{fontSize:13,color:T.muted,marginBottom:12}}>Importez un DPGF, devis, bordereau de prix (PDF, Excel, image)</div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,.csv,image/*" style={{display:"none"}} onChange={function(e){var f=e.target.files[0];if(f){e.target.value="";analyseDoc(f);}}}/>
+        <button onClick={function(){fileRef.current.click();}} disabled={loading} style={{background:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"Analyse en cours...":"Choisir un document"}</button>
+      </div>
+
+      {/* Progression */}
+      {msg&&<div style={{background:T.secondary+"11",border:"1px solid "+T.secondary+"33",borderRadius:8,padding:"10px 14px",fontSize:13,color:T.secondary,fontWeight:600}}>{msg}</div>}
+      {err&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 14px",color:T.danger,fontSize:12}}>⚠️ {err}</div>}
+
+      {/* Postes décomposés */}
+      {postes.map(function(po,pi){
+        var totalPoste=0;
+        (po.elements||[]).forEach(function(el,ei){totalPoste+=evalFormule(el.formule,el.vars,vals,pi,ei);});
+        return <div key={pi} style={{background:T.card,border:"1px solid "+T.border,borderRadius:12,overflow:"hidden"}}>
+          {/* Header poste */}
+          <div style={{background:T.primary+"22",borderBottom:"1px solid "+T.border,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontWeight:800,fontSize:15,color:T.primary}}>{po.libelle}</div>
+              <div style={{fontSize:11,color:T.muted,marginTop:2}}>Unité : {po.unite||"U"}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:11,color:T.muted}}>Total déboursé/unité</div>
+              <div style={{fontWeight:800,fontSize:18,color:T.success}}>{fmt(totalPoste)}</div>
+            </div>
+          </div>
+
+          {/* Éléments */}
+          <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:12}}>
+            {(po.elements||[]).map(function(el,ei){
+              var result=evalFormule(el.formule,el.vars,vals,pi,ei);
+              var cc=catColor[el.categorie]||T.muted;
+              return <div key={ei} style={{background:T.mid,borderRadius:10,padding:"12px 14px",border:"1px solid "+cc+"44"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <span style={{background:cc+"22",color:cc,borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:700}}>{el.categorie}</span>
+                      <span style={{fontWeight:700,fontSize:13}}>{el.libelle}</span>
+                    </div>
+                    {/* Note de calcul */}
+                    <div style={{fontSize:11,color:T.muted,background:T.bg,borderRadius:6,padding:"5px 10px",fontFamily:"monospace"}}>
+                      📐 {el.description||el.formule}
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
+                    <div style={{fontSize:10,color:T.muted}}>Résultat</div>
+                    <div style={{fontWeight:800,fontSize:16,color:cc}}>{fmt(result)}</div>
+                    <div style={{fontSize:10,color:T.muted}}>XOF/{po.unite||"U"}</div>
+                  </div>
+                </div>
+                {/* Variables saisissables */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8,marginTop:8}}>
+                  {(el.vars||[]).map(function(v){
+                    var key="p"+pi+"_e"+ei+"_"+v.nom;
+                    return <div key={v.nom} style={{background:T.card,borderRadius:7,padding:"8px 10px"}}>
+                      <div style={{fontSize:10,color:T.muted,marginBottom:3}}>{v.label}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input
+                          type="number"
+                          value={vals[key]!==undefined?vals[key]:v.valeur}
+                          onChange={function(e){setVal(key,parseFloat(e.target.value)||0);}}
+                          style={{flex:1,background:T.mid,border:"1px solid "+cc+"55",borderRadius:6,padding:"6px 8px",color:T.white,fontSize:13,fontWeight:700,outline:"none",width:"100%"}}
+                        />
+                        <span style={{fontSize:10,color:T.muted,whiteSpace:"nowrap"}}>{v.unite}</span>
+                      </div>
+                    </div>;
+                  })}
+                </div>
+                {/* Formule visible */}
+                <div style={{marginTop:8,fontSize:10,color:T.muted,fontFamily:"monospace",background:T.bg,borderRadius:5,padding:"4px 8px"}}>
+                  = {el.formule} = <strong style={{color:cc}}>{result} XOF/{po.unite||"U"}</strong>
+                </div>
+              </div>;
+            })}
+          </div>
+
+          {/* Récap poste */}
+          <div style={{background:T.success+"11",borderTop:"1px solid "+T.success+"33",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:T.muted,fontWeight:600}}>TOTAL DÉBOURSÉ SEC / {po.unite||"U"}</span>
+            <span style={{fontWeight:800,fontSize:16,color:T.success}}>{fmt(totalPoste)}</span>
+          </div>
+        </div>;
+      })}
+
+      {postes.length>0&&<div style={{background:T.primary+"11",border:"1px solid "+T.primary+"33",borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontWeight:800,fontSize:14,color:T.primary}}>TOTAL GÉNÉRAL</span>
+        <span style={{fontWeight:800,fontSize:20,color:T.primary}}>{fmt(postes.reduce(function(acc,po,pi){var t=0;(po.elements||[]).forEach(function(el,ei){t+=evalFormule(el.formule,el.vars,vals,pi,ei);});return acc+t;},0))}</span>
       </div>}
     </div>
   </Modal>;
@@ -696,6 +914,7 @@ function DepensesIntv(p){
         {saveErr&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:6,padding:"6px 10px",fontSize:11,color:T.danger,marginBottom:8}}>⚠️ {saveErr}</div>}
         <FG cols={2}>
           <FF label="Libellé *" value={form.libelle} onChange={function(v){upF("libelle",v);}} full T={T}/>
+          <FS label="Catégorie" value={form.categorie} onChange={function(v){upF("categorie",v);}} options={CATS} T={T}/>
           <FF label="Montant (XOF) *" type="number" value={form.montant} onChange={function(v){upF("montant",v);}} T={T}/>
           <FF label="Date" type="date" value={form.date} onChange={function(v){upF("date",v);}} T={T}/>
         </FG>
