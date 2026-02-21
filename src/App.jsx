@@ -432,13 +432,13 @@ function AnalyseDocModal(p){
       var rs=await q("debourse_sessions").insert({nom:sessNom,chantier_id:null,taux_charges:cfg.taux_charges,coeff_fg:cfg.coeff_fg,coeff_benef:cfg.coeff_benef});
       if(!rs.data||rs.error)throw new Error("Erreur création session");
       var sid=rs.data.id,ordre=0;
-      for(var pi=0;pi<postes.length;pi++){
-        var po=postes[pi];var qte=po.quantite||1;
+      for(var pi2=0;pi2<postes.length;pi2++){
+        var po=postes[pi2];var qte=po.quantite||1;
         var totMO=0,totMat=0,totMateriel=0,totST=0;
-        (po.elements||[]).forEach(function(el,ei){var res=evalFormule(el.formule,el.vars,vals,pi,ei);var cat=el.categorie||"";if(cat==="MO")totMO+=res;else if(cat==="Materiaux")totMat+=res;else if(cat==="Materiel")totMateriel+=res;else totST+=res;});
+        (po.elements||[]).forEach(function(el,ei){var res=evalFormule(el.formule,el.vars,vals,pi2,ei);var cat=el.categorie||"";if(cat==="MO")totMO+=res;else if(cat==="Materiaux")totMat+=res;else if(cat==="Materiel")totMateriel+=res;else totST+=res;});
         var ds=totMO+totMat+totMateriel+totST,fg=ds*(cfg.coeff_fg/100),pr=ds+fg,pv=pr*(1+cfg.coeff_benef/100);
         await q("debourse_taches").insert({session_id:sid,libelle:po.libelle,unite:po.unite,quantite:qte,salaire:totMO,rendement:1,materiau:totMat,materiel:totMateriel,sous_traitance:totST,main_oeuvre_u:Math.round(totMO),debourse_sec_u:Math.round(ds),prix_revient_u:Math.round(pr),prix_vente_u:Math.round(pv),prix_vente_total:Math.round(pv*qte),ordre:ordre++});
-        for(var ei=0;ei<(po.elements||[]).length;ei++){var el=po.elements[ei];var res2=evalFormule(el.formule,el.vars,vals,pi,ei);var isMO=el.categorie==="MO";await q("debourse_taches").insert({session_id:sid,libelle:"  └ "+el.libelle,unite:"U",quantite:qte,salaire:isMO?res2:0,rendement:1,materiau:el.categorie==="Materiaux"?res2:0,materiel:el.categorie==="Materiel"?res2:0,sous_traitance:el.categorie==="Sous-traitance"?res2:0,main_oeuvre_u:isMO?Math.round(res2):0,debourse_sec_u:Math.round(res2),prix_revient_u:Math.round(res2*(1+cfg.coeff_fg/100)),prix_vente_u:Math.round(res2*(1+cfg.coeff_fg/100)*(1+cfg.coeff_benef/100)),prix_vente_total:Math.round(res2*(1+cfg.coeff_fg/100)*(1+cfg.coeff_benef/100)*qte),ordre:ordre++});}
+        for(var ei2=0;ei2<(po.elements||[]).length;ei2++){var el=po.elements[ei2];var res2=evalFormule(el.formule,el.vars,vals,pi2,ei2);var isMO=el.categorie==="MO";await q("debourse_taches").insert({session_id:sid,libelle:"  └ "+el.libelle,unite:"U",quantite:qte,salaire:isMO?res2:0,rendement:1,materiau:el.categorie==="Materiaux"?res2:0,materiel:el.categorie==="Materiel"?res2:0,sous_traitance:el.categorie==="Sous-traitance"?res2:0,main_oeuvre_u:isMO?Math.round(res2):0,debourse_sec_u:Math.round(res2),prix_revient_u:Math.round(res2*(1+cfg.coeff_fg/100)),prix_vente_u:Math.round(res2*(1+cfg.coeff_fg/100)*(1+cfg.coeff_benef/100)),prix_vente_total:Math.round(res2*(1+cfg.coeff_fg/100)*(1+cfg.coeff_benef/100)*qte),ordre:ordre++});}
       }
       setDone(true);reload();
     }catch(e){setErr("Erreur import: "+e.message);}
