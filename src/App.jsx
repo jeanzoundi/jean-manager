@@ -306,6 +306,24 @@ function Debourse(p){
 }
 
 // ── IA OUVRAGE MODAL — Décomposition intelligente ─────────────────────────────
+async function callWithRetry(body, maxRetries=4){
+    for(var attempt=1;attempt<=maxRetries;attempt++){
+      var r=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if(r.ok)return r.json();
+      var errText=await r.text();
+      if(r.status===529||r.status===503||r.status===500){
+        if(attempt<maxRetries){
+          var delay=attempt*4000;
+          await new Promise(function(res){setTimeout(res,delay);});
+        } else throw new Error("Serveurs surchargés après "+maxRetries+" tentatives — réessayez dans 1-2 min");
+      } else throw new Error("API "+r.status+": "+errText.slice(0,150));
+    }
+}
+
 function IAOuvrageModal(p){
   var onClose=p.onClose,sessions=p.sessions,reload=p.reload,T=p.T;
   var _q=useState(""),query=_q[0],setQuery=_q[1];
@@ -316,7 +334,7 @@ function IAOuvrageModal(p){
   var _imp=useState(false),importing=_imp[0],setImporting=_imp[1];
   var _done=useState(false),done=_done[0],setDone=_done[1];
 
-  async function callWithRetry(body, maxRetries=4){
+  async function callWithRetryLocal(body, maxRetries=4){
     for(var attempt=1;attempt<=maxRetries;attempt++){
       var r=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
@@ -350,7 +368,7 @@ function IAOuvrageModal(p){
         +"Coffrage bois|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
         +"Beton arme C25|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
         +"Max 15 lignes. Commence directement.";
-      var data=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:prompt}]});
+      var data=await callWithRetryLocal({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:prompt}]});
       var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").trim();
       // Parser CSV pipe — robuste, pas de JSON
       var lines=txt.split("\n").map(function(l){return l.trim();}).filter(function(l){
@@ -560,7 +578,7 @@ function SessionDetail(p){
         var b64=await new Promise(function(res,rej){var rr=new FileReader();rr.onload=function(e){res(e.target.result.split(",")[1]);};rr.onerror=rej;rr.readAsDataURL(file);});
         var cb=isPDF?{type:"document",source:{type:"base64",media_type:file.type,data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
         var pp2="Expert BTP Cote d'Ivoire. Extrais TOUTES les taches de ce document. Reponds en lignes CSV pipe:\nLIBELLE|QUANTITE|UNITE|PRIX_UNITAIRE|MONTANT_TOTAL|MO|MATERIAUX|MATERIEL|SOUS_TRAITANCE\nIgnore totaux/TVA. Commence directement par les lignes.";
-        var dd=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:[cb,{type:"text",text:pp2}]}]});
+        var dd=await callWithRetryLocal({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:[cb,{type:"text",text:pp2}]}]});
         var tt=(dd.content||[]).map(function(i){return i.text||"";}).join("");
         tt.trim().split("\n").forEach(function(line){
           line=line.trim();if(!line||line.indexOf("|")<0)return;
@@ -665,6 +683,67 @@ function SessionDetail(p){
   </div>;
 }
 
+function DepensesIntv(p){
+  var intv=p.intv,reload=p.reload,T=p.T;
+  var _open=useState(false),open=_open[0],setOpen=_open[1];
+  var _edit=useState(null),editDep=_edit[0],setEditDep=_edit[1];
+  var _f=useState({libelle:"",montant:"",date:today()}),form=_f[0],setForm=_f[1];
+  var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
+  var deps=intv.depenses||[];
+  var total=deps.reduce(function(a,d){return a+d.montant;},0);
+
+  function startEdit(d){setEditDep(d);setForm({libelle:d.libelle||"",montant:d.montant||"",date:d.date||today()});setOpen(true);}
+  function resetForm(){setEditDep(null);setForm({libelle:"",montant:"",date:today()});}
+  function upF(k,v){setForm(function(pp){return Object.assign({},pp,{[k]:v});});}
+
+  function save(){
+    if(!form.libelle||!form.montant)return;
+    setSaving(true);
+    var payload={libelle:form.libelle,montant:parseFloat(form.montant)||0,date:form.date};
+    var op=editDep
+      ?q("intervention_depenses").eq("id",editDep.id).update(payload)
+      :q("intervention_depenses").insert(Object.assign({},payload,{intervention_id:intv.id}));
+    op.then(function(){setSaving(false);setOpen(false);resetForm();reload();});
+  }
+  function del(id){if(!window.confirm("Supprimer ?"))return;q("intervention_depenses").eq("id",id).del().then(function(){reload();});}
+
+  return <div style={{background:T.mid,borderRadius:8,padding:"10px 12px"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:open&&deps.length?8:0}}>
+      <div>
+        <div style={{fontSize:10,color:T.muted}}>Coût total</div>
+        <div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(total)}</div>
+      </div>
+      <button onClick={function(){resetForm();setOpen(function(v){return !v;});}} style={{background:T.primary+"22",border:"1px solid "+T.primary+"44",color:T.primary,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontWeight:700}}>
+        {open?"Fermer":"+ Dépense"}
+      </button>
+    </div>
+
+    {open&&<div style={{marginTop:10,borderTop:"1px solid "+T.border+"66",paddingTop:10,display:"flex",flexDirection:"column",gap:8}}>
+      {/* Liste dépenses existantes */}
+      {deps.map(function(d){return <div key={d.id} style={{display:"flex",alignItems:"center",gap:8,fontSize:12}}>
+        <div style={{flex:1}}><span style={{fontWeight:600}}>{d.libelle}</span><span style={{color:T.muted,marginLeft:6}}>{d.date}</span></div>
+        <span style={{fontWeight:700,color:T.warning}}>{fmt(d.montant)}</span>
+        <button onClick={function(){startEdit(d);}} style={{background:T.warning+"22",border:"1px solid "+T.warning+"44",color:T.warning,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✏️</button>
+        <button onClick={function(){del(d.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>🗑</button>
+      </div>;})}
+
+      {/* Formulaire ajout/édition */}
+      <div style={{background:T.card,borderRadius:8,padding:"10px 12px",border:"1px solid "+T.border,marginTop:4}}>
+        <div style={{fontWeight:600,fontSize:12,marginBottom:8,color:editDep?T.warning:T.primary}}>{editDep?"✏️ Modifier la dépense":"+ Nouvelle dépense"}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <FF label="Libellé *" value={form.libelle} onChange={function(v){upF("libelle",v);}} full T={T}/>
+          <FF label="Montant (XOF) *" type="number" value={form.montant} onChange={function(v){upF("montant",v);}} T={T}/>
+          <FF label="Date" type="date" value={form.date} onChange={function(v){upF("date",v);}} T={T}/>
+        </div>
+        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          {editDep&&<button onClick={function(){resetForm();}} style={{background:T.mid,color:T.muted,border:"1px solid "+T.border,borderRadius:7,padding:"7px 14px",fontSize:12,cursor:"pointer"}}>Annuler</button>}
+          <button onClick={save} disabled={saving} style={{background:saving?T.mid:T.success,color:"#fff",border:"none",borderRadius:7,padding:"7px 16px",fontWeight:700,fontSize:12,cursor:saving?"wait":"pointer"}}>{saving?"...":(editDep?"Enregistrer":"Ajouter")}</button>
+        </div>
+      </div>
+    </div>}
+  </div>;
+}
+
 // ── INTERVENTIONS ─────────────────────────────────────────────────────────────
 function exportIntvCSV(data,label){
   if(!data.length){alert("Aucune intervention.");return;}
@@ -743,10 +822,7 @@ function Interventions(p){
         </div>
         {i.intervenant&&<div style={{fontSize:12,color:T.muted}}>👷 {i.intervenant}</div>}
         {i.description&&<div style={{fontSize:12,color:T.muted,background:T.mid,borderRadius:6,padding:"7px 10px"}}>{i.description}</div>}
-        <div style={{background:T.mid,borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{fontSize:10,color:T.muted}}>Cout</div><div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(totalD(i))}</div></div>
-          <Badge label={i.facturee?"Facturee":"Non facturee"} color={i.facturee?T.success:T.danger} small/>
-        </div>
+        <DepensesIntv intv={i} reload={reload} T={T}/>
         <div style={{display:"flex",gap:6,alignItems:"center"}}>
           <select value={i.statut} onChange={function(e){updSt(i.id,e.target.value);}} style={{flex:1,background:(STIC[i.statut]||T.muted)+"22",border:"1px solid "+(STIC[i.statut]||T.muted)+"55",borderRadius:6,padding:"5px 10px",color:STIC[i.statut]||T.muted,fontSize:12,cursor:"pointer",outline:"none",fontWeight:700}}>
             {["En attente","En cours","Terminee"].map(function(s){return <option key={s} value={s}>{s}</option>;})}
