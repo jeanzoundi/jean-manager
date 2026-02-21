@@ -500,66 +500,44 @@ function AnalyseDocModal(p){
         texte=await file.text();
       }
       setMsg("🤖 Analyse et décomposition des postes...");
-      var prompt="Tu es Expert BTP Côte d'Ivoire. Analyse ce document BTP et décompose CHAQUE POSTE en éléments constitutifs avec notes de calcul.\n\n"
-        +"DOCUMENT:\n"+texte.slice(0,6000)+"\n\n"
-        +"Pour chaque poste identifié, génère sa décomposition COMPLÈTE.\n"
-        +"Réponds UNIQUEMENT en JSON valide, format strict:\n"
-        +"{\n"
-        +"  \"postes\": [\n"
-        +"    {\n"
-        +"      \"libelle\": \"Fouilles en rigole\",\n"
-        +"      \"unite\": \"m3\",\n"
-        +"      \"elements\": [\n"
-        +"        {\n"
-        +"          \"libelle\": \"Main d'oeuvre fouille\",\n"
-        +"          \"categorie\": \"MO\",\n"
-        +"          \"formule\": \"(nb_ouvriers * salaire_j) / rendement_j\",\n"
-        +"          \"description\": \"Coût MO par m3 = (nb ouvriers × salaire journalier) ÷ rendement journalier\",\n"
-        +"          \"vars\": [\n"
-        +"            {\"nom\":\"nb_ouvriers\",\"label\":\"Nombre d'ouvriers\",\"valeur\":3,\"unite\":\"ouvriers\"},\n"
-        +"            {\"nom\":\"salaire_j\",\"label\":\"Salaire journalier\",\"valeur\":5000,\"unite\":\"XOF/j\"},\n"
-        +"            {\"nom\":\"rendement_j\",\"label\":\"Rendement journalier\",\"valeur\":4,\"unite\":\"m3/j\"}\n"
-        +"          ]\n"
-        +"        },\n"
-        +"        {\n"
-        +"          \"libelle\": \"Location pelle mécanique\",\n"
-        +"          \"categorie\": \"Materiel\",\n"
-        +"          \"formule\": \"cout_location_j / rendement_pelle\",\n"
-        +"          \"description\": \"Coût matériel par m3 = location journalière ÷ rendement pelle\",\n"
-        +"          \"vars\": [\n"
-        +"            {\"nom\":\"cout_location_j\",\"label\":\"Location pelle/jour\",\"valeur\":80000,\"unite\":\"XOF/j\"},\n"
-        +"            {\"nom\":\"rendement_pelle\",\"label\":\"Rendement pelle\",\"valeur\":40,\"unite\":\"m3/j\"}\n"
-        +"          ]\n"
-        +"        }\n"
-        +"      ]\n"
-        +"    }\n"
-        +"  ]\n"
-        +"}\n"
-        +"Règles:\n"
-        +"- Formules avec noms de variables EXACTEMENT comme dans vars[].nom\n"
-        +"- Valeurs réalistes Côte d'Ivoire (XOF)\n"
-        +"- 2 à 6 éléments par poste (MO, Matériaux, Matériel, Transport, etc.)\n"
-        +"- JSON pur, aucun texte avant ou après";
-      var d2=await aiCall({model:AI_MODEL,max_tokens:6000,messages:[{role:"user",content:prompt}]});
-      var txt=(d2.content||[]).map(function(i){return i.text||"";}).join("");
-      var jm=txt.match(/\{[\s\S]*\}/);
-      if(!jm)throw new Error("Réponse IA invalide");
-      var parsed=JSON.parse(jm[0]);
-      var ps=(parsed.postes||[]).map(function(po,pi){
-        var initVals={};
-        (po.elements||[]).forEach(function(el,ei){
-          (el.vars||[]).forEach(function(v){
-            initVals["p"+pi+"_e"+ei+"_"+v.nom]=v.valeur;
-          });
-        });
-        return po;
-      });
+      // Traitement par lot : d'abord identifier les postes, ensuite décomposer
+      var promptPostes="Expert BTP CI. Identifie les postes principaux de ce document BTP.\n"
+        +"Réponds UNIQUEMENT en JSON: {\"postes\":[{\"libelle\":\"Fouilles en rigole\",\"unite\":\"m3\"},{\"libelle\":\"Béton de propreté\",\"unite\":\"m3\"}]}\n"
+        +"Max 10 postes. JSON pur.\nDOCUMENT:\n"+texte.slice(0,3000);
+      var d2=await aiCall({model:AI_MODEL,max_tokens:1000,messages:[{role:"user",content:promptPostes}]});
+      var txt2=(d2.content||[]).map(function(i){return i.text||"";}).join("");
+      var jm2=txt2.match(/\{[\s\S]*\}/);
+      if(!jm2)throw new Error("Impossible d'identifier les postes");
+      var postesBase=JSON.parse(jm2[0]).postes||[];
+      if(!postesBase.length)throw new Error("Aucun poste trouvé dans le document");
+
+      // Décomposer chaque poste un par un
+      var ps=[];
+      for(var pi=0;pi<Math.min(postesBase.length,8);pi++){
+        var pb=postesBase[pi];
+        setMsg("🔍 Décomposition "+( pi+1)+"/"+Math.min(postesBase.length,8)+" : "+pb.libelle+"...");
+        var promptEl="Expert BTP CI. Décompose ce poste BTP en éléments avec notes de calcul.\n"
+          +"Poste: "+pb.libelle+" (unité: "+(pb.unite||"U")+")\n"
+          +"Réponds UNIQUEMENT en JSON valide:\n"
+          +"{\"elements\":[{\"libelle\":\"Main d'oeuvre\",\"categorie\":\"MO\",\"formule\":\"nb_ouvriers*salaire_j/rendement_j\",\"description\":\"(nb ouvriers × salaire/j) ÷ rendement\",\"vars\":[{\"nom\":\"nb_ouvriers\",\"label\":\"Nb ouvriers\",\"valeur\":3,\"unite\":\"ouvriers\"},{\"nom\":\"salaire_j\",\"label\":\"Salaire/jour\",\"valeur\":5000,\"unite\":\"XOF/j\"},{\"nom\":\"rendement_j\",\"label\":\"Rendement/jour\",\"valeur\":4,\"unite\":\"m3/j\"}]}]}\n"
+          +"Règles: 2-4 éléments max, valeurs réalistes XOF CI, formules simples avec noms vars exacts, JSON pur.";
+        try{
+          var de=await aiCall({model:AI_MODEL,max_tokens:2000,messages:[{role:"user",content:promptEl}]});
+          var txte=(de.content||[]).map(function(i){return i.text||"";}).join("");
+          var jme=txte.match(/\{[\s\S]*\}/);
+          var elements=jme?JSON.parse(jme[0]).elements||[]:[];
+          ps.push({libelle:pb.libelle,unite:pb.unite||"U",elements:elements});
+        }catch(e){
+          ps.push({libelle:pb.libelle,unite:pb.unite||"U",elements:[]});
+        }
+      }
+
       // Init vals
       var iv={};
-      ps.forEach(function(po,pi){
+      ps.forEach(function(po,pi2){
         (po.elements||[]).forEach(function(el,ei){
           (el.vars||[]).forEach(function(v){
-            iv["p"+pi+"_e"+ei+"_"+v.nom]=v.valeur;
+            iv["p"+pi2+"_e"+ei+"_"+v.nom]=v.valeur;
           });
         });
       });
