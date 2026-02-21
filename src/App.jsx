@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 
 const SUPA_URL = "https://mbkwpaxissvvjhewkggl.supabase.co";
 const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1ia3dwYXhpc3N2dmpoZXdrZ2dsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE0MjQzOTMsImV4cCI6MjA4NzAwMDM5M30.Zo9aJVDByO8aVSADfSCc2m4jCI1qeXuWYQgVRT-a3LA";
@@ -8,7 +8,6 @@ const REST = SUPA_URL + "/rest/v1";
 const AI_URL = "/api/claude";
 const AI_MODEL = "claude-sonnet-4-20250514";
 
-// ── SUPABASE QUERY BUILDER ────────────────────────────────────────────────────
 function q(table){
   var _f=[],_s="*",_o=null;
   var api={
@@ -23,38 +22,55 @@ function q(table){
   return api;
 }
 
-// ── AI HELPERS — GLOBAL ───────────────────────────────────────────────────────
-async function aiCall(body, maxRetries){
-  maxRetries = maxRetries||4;
+async function aiCall(body,maxRetries){
+  maxRetries=maxRetries||4;
   for(var attempt=1;attempt<=maxRetries;attempt++){
     try{
       var r=await fetch(AI_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
       if(r.ok)return r.json();
       var et=await r.text();
-      if((r.status===529||r.status===503||r.status===500||r.status===529)&&attempt<maxRetries){
-        await new Promise(function(res){setTimeout(res,attempt*4000);});
-      } else throw new Error("API "+r.status+": "+et.slice(0,150));
+      if((r.status===529||r.status===503||r.status===500)&&attempt<maxRetries){await new Promise(function(res){setTimeout(res,attempt*4000);});}
+      else throw new Error("API "+r.status+": "+et.slice(0,150));
     }catch(e){
-      if(attempt<maxRetries&&(e.message.indexOf("fetch")>=0||e.message.indexOf("network")>=0)){
-        await new Promise(function(res){setTimeout(res,attempt*3000);});
-      } else throw e;
+      if(attempt<maxRetries&&(e.message.indexOf("fetch")>=0||e.message.indexOf("network")>=0)){await new Promise(function(res){setTimeout(res,attempt*3000);});}
+      else throw e;
     }
   }
   throw new Error("Echec apres "+maxRetries+" tentatives");
 }
-async function aiText(messages, maxTok, retries){
-  var d=await aiCall({model:AI_MODEL,max_tokens:maxTok||1000,messages:messages},retries);
+async function aiText(messages,maxTok){
+  var d=await aiCall({model:AI_MODEL,max_tokens:maxTok||1000,messages:messages});
   return(d.content||[]).map(function(i){return i.text||"";}).join("");
 }
+function safeParseJSON(txt){
+  try{var jm=txt.match(/\{[\s\S]*\}/);if(jm)return JSON.parse(jm[0]);}catch(e){}
+  try{
+    var jm2=txt.match(/\{[\s\S]*/);if(!jm2)return null;
+    var s=jm2[0],opens=0,openb=0,inStr=false,esc=false;
+    for(var i=0;i<s.length;i++){
+      var c=s[i];
+      if(esc){esc=false;continue;}
+      if(c==="\\"&&inStr){esc=true;continue;}
+      if(c==='"'){inStr=!inStr;continue;}
+      if(inStr)continue;
+      if(c==='{')opens++;else if(c==='}')opens--;
+      else if(c==='[')openb++;else if(c===']')openb--;
+    }
+    if(inStr)s+='"';
+    s=s.replace(/,\s*$/,"");
+    for(var j=0;j<openb;j++)s+="]";
+    for(var k=0;k<opens;k++)s+="}";
+    return JSON.parse(s);
+  }catch(e){return null;}
+}
 
-// ── CONSTANTS ─────────────────────────────────────────────────────────────────
 const DT={primary:"#F97316",secondary:"#3B82F6",success:"#22C55E",danger:"#EF4444",warning:"#EAB308",bg:"#1C1917",card:"#292524",mid:"#44403C",border:"#57534E",white:"#FAFAF9",muted:"#A8A29E",sidebarWidth:220,borderRadius:12,fontFamily:"'Segoe UI',system-ui,sans-serif",companyName:"JEAN BTP SARL",companyAddress:"Zone Industrielle, Abidjan",companyTel:"+225 27 00 00 00",companyEmail:"devis@jeanbtp.ci",companySiret:"CI-ABJ-2024-B-12345"};
 var CATS=["Main d'oeuvre","Materiaux","Equipement","Transport","Sous-traitance","Divers"];
 var UNITES=["U","m2","ml","m3","kg","t","forfait","h","j","ens."];
 var STATUTS_CH=["Brouillon","Planifie","En cours","En derive","En reception","Cloture"];
 var TYPES_INT=["Urgence","Preventive","Corrective","Inspection"];
+var MOIS=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
-// ── UTILS ─────────────────────────────────────────────────────────────────────
 function fmt(n){return new Intl.NumberFormat("fr-FR",{maximumFractionDigits:0}).format(n||0)+" XOF";}
 function fmtS(n){var a=Math.abs(n||0);if(a>=1e6)return((n||0)/1e6).toFixed(1)+"M";if(a>=1e3)return Math.round((n||0)/1e3)+"k";return String(Math.round(n||0));}
 function pct(v,t){return t>0?Math.round(v/t*100):0;}
@@ -76,29 +92,40 @@ function exportCSV(rows,filename){
   var blob=new Blob(["\uFEFF"+header+"\n"+body],{type:"text/csv;charset=utf-8;"});
   var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=filename;a.click();
 }
-function exportChantierCSV(chantier){
-  var rows=(chantier.depenses||[]).map(function(d){return{Date:d.date,Libelle:d.libelle,Categorie:d.categorie,Montant:d.montant,Note:d.note||""};});
-  if(!rows.length){alert("Aucune depense.");return;}exportCSV(rows,chantier.nom.replace(/\s/g,"_")+"_depenses.csv");
+function exportChantierCSV(c){
+  var rows=(c.depenses||[]).map(function(d){return{Date:d.date,Libelle:d.libelle,Categorie:d.categorie,Montant:d.montant,Note:d.note||""};});
+  if(!rows.length){alert("Aucune depense.");return;}exportCSV(rows,c.nom.replace(/\s/g,"_")+"_depenses.csv");
 }
-function exportChantierHTML(chantier,T){
-  var dep=chantier.depenses||[];var totalB=chantier.budgetInitial,totalD=totalDep(chantier);
-  var allRows=dep.map(function(d,i){var bg=i%2===0?"#fff":"#f9f9f9";return "<tr style='background:"+bg+"'><td>"+(d.date||"")+"</td><td>"+d.libelle+"</td><td>"+d.categorie+"</td><td style='text-align:right'>"+fmt(d.montant)+"</td><td>"+(d.note||"")+"</td></tr>";}).join("");
-  var style="body{font-family:sans-serif;margin:2cm;font-size:10pt}h1{color:"+T.primary+"}table{width:100%;border-collapse:collapse;margin-bottom:20px}th{background:"+T.primary+";color:#fff;padding:8px;text-align:left}td{padding:7px 10px;border-bottom:1px solid #eee}.tot{background:"+T.primary+";color:#fff;font-weight:800}";
-  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>"+chantier.nom+"</title><style>"+style+"</style></head><body><h1>"+chantier.nom+"</h1><table><thead><tr><th>Date</th><th>Libelle</th><th>Categorie</th><th>Montant</th><th>Note</th></tr></thead><tbody>"+allRows+"<tr class='tot'><td colspan='3'>TOTAL</td><td>"+fmt(totalD)+"</td><td></td></tr></tbody></table></body></html>";
+function exportChantierHTML(c,T){
+  var dep=c.depenses||[],totalD=totalDep(c);
+  var rows=dep.map(function(d,i){var bg=i%2===0?"#fff":"#f9f9f9";return "<tr style='background:"+bg+"'><td>"+(d.date||"")+"</td><td>"+d.libelle+"</td><td>"+d.categorie+"</td><td style='text-align:right'>"+fmt(d.montant)+"</td><td>"+(d.note||"")+"</td></tr>";}).join("");
+  var style="body{font-family:sans-serif;margin:2cm;font-size:10pt}h1{color:"+T.primary+"}table{width:100%;border-collapse:collapse}th{background:"+T.primary+";color:#fff;padding:8px;text-align:left}td{padding:7px 10px;border-bottom:1px solid #eee}.tot{background:"+T.primary+";color:#fff;font-weight:800}";
+  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>"+c.nom+"</title><style>"+style+"</style></head><body><h1>"+c.nom+"</h1><table><thead><tr><th>Date</th><th>Libelle</th><th>Categorie</th><th>Montant</th><th>Note</th></tr></thead><tbody>"+rows+"<tr class='tot'><td colspan='3'>TOTAL</td><td>"+fmt(totalD)+"</td><td></td></tr></tbody></table></body></html>";
   var w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(function(){w.focus();w.print();},500);
 }
 function exportDebourseHTML(sess,taches,cfg,chNom,T){
   var rows=taches.map(function(t,i){var c=calcTache(t,cfg.tc,cfg);var bg=i%2===0?"#fff":"#f9f9f9";return "<tr style='background:"+bg+"'><td>"+(i+1)+"</td><td>"+t.libelle+"</td><td style='text-align:center'>"+t.quantite+"</td><td style='text-align:center'>"+t.unite+"</td><td style='text-align:right'>"+fmt(Math.round(c.ds))+"</td><td style='text-align:right'>"+fmt(Math.round(c.pr))+"</td><td style='text-align:right;font-weight:700;color:"+T.primary+"'>"+fmt(Math.round(c.pvt))+"</td></tr>";}).join("");
   var tot=taches.reduce(function(acc,t){var c=calcTache(t,cfg.tc,cfg);return{ds:acc.ds+c.ds*(t.quantite||0),pr:acc.pr+c.pr*(t.quantite||0),pvt:acc.pvt+c.pvt};},{ds:0,pr:0,pvt:0});
   var style="body{font-family:sans-serif;margin:2cm;font-size:10pt}h1{color:"+T.primary+"}table{width:100%;border-collapse:collapse;margin-bottom:20px}th{background:"+T.primary+";color:#fff;padding:8px;text-align:left}td{padding:7px 10px;border-bottom:1px solid #eee}.tot{background:"+T.primary+";color:#fff;font-weight:800}";
-  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>Debours - "+sess.nom+"</title><style>"+style+"</style></head><body><h1>Debours Sec - "+sess.nom+"</h1><div style='background:#f5f5f5;padding:12px;border-radius:6px;margin-bottom:16px'>Chantier: <b>"+(chNom||"--")+"</b> | Charges: <b>"+cfg.tc+"%</b> | FG: <b>"+cfg.fg+"%</b> | Benefice: <b>"+cfg.benef+"%</b></div><table><thead><tr><th>#</th><th>Designation</th><th>Qte</th><th>Unite</th><th>Debours sec</th><th>Prix revient</th><th>PV total</th></tr></thead><tbody>"+rows+"<tr class='tot'><td colspan='4'>TOTAL</td><td>"+fmt(Math.round(tot.ds))+"</td><td>"+fmt(Math.round(tot.pr))+"</td><td>"+fmt(Math.round(tot.pvt))+"</td></tr></tbody></table></body></html>";
+  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>Debours - "+sess.nom+"</title><style>"+style+"</style></head><body><h1>Debours Sec - "+sess.nom+"</h1><p>Chantier: <b>"+(chNom||"--")+"</b> | Charges: <b>"+cfg.tc+"%</b> | FG: <b>"+cfg.fg+"%</b> | Benefice: <b>"+cfg.benef+"%</b></p><table><thead><tr><th>#</th><th>Designation</th><th>Qte</th><th>Unite</th><th>Debours sec</th><th>Prix revient</th><th>PV total</th></tr></thead><tbody>"+rows+"<tr class='tot'><td colspan='4'>TOTAL</td><td>"+fmt(Math.round(tot.ds))+"</td><td>"+fmt(Math.round(tot.pr))+"</td><td>"+fmt(Math.round(tot.pvt))+"</td></tr></tbody></table></body></html>";
+  var w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(function(){w.focus();w.print();},500);
+}
+function exportIntvCSV(data,label){
+  if(!data.length){alert("Aucune intervention.");return;}
+  exportCSV(data.map(function(i){return{Titre:i.titre,Type:i.type,Statut:i.statut,Intervenant:i.intervenant||"",Chantier:i.chantier||"",Date:i.date_creation||"",Description:i.description||"",Facturee:i.facturee?"Oui":"Non"};}), "interventions_"+label.replace(/\s/g,"_")+".csv");
+}
+function exportIntvHTML(data,label,T){
+  if(!data.length){alert("Aucune intervention.");return;}
+  var TC={Urgence:T.danger,Preventive:T.secondary,Corrective:T.primary,Inspection:"#A855F7"};
+  var rows=data.map(function(i,idx){var bg=idx%2===0?"#fff":"#f9f9f9";var col=TC[i.type]||T.primary;return "<tr style='background:"+bg+"'><td>"+i.titre+"</td><td style='color:"+col+";font-weight:700'>"+i.type+"</td><td>"+i.statut+"</td><td>"+(i.intervenant||"-")+"</td><td>"+(i.chantier||"-")+"</td><td>"+(i.date_creation||"-")+"</td><td>"+(i.facturee?"✅":"❌")+"</td></tr>";}).join("");
+  var style="body{font-family:sans-serif;margin:2cm;font-size:10pt}h1{color:"+T.primary+"}table{width:100%;border-collapse:collapse}th{background:"+T.primary+";color:#fff;padding:8px;text-align:left}td{padding:7px 10px;border-bottom:1px solid #eee}";
+  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>Interventions - "+label+"</title><style>"+style+"</style></head><body><h1>Interventions — "+label+"</h1><table><thead><tr><th>Titre</th><th>Type</th><th>Statut</th><th>Intervenant</th><th>Chantier</th><th>Date</th><th>Facturée</th></tr></thead><tbody>"+rows+"</tbody></table></body></html>";
   var w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(function(){w.focus();w.print();},500);
 }
 
-// ── THEME ─────────────────────────────────────────────────────────────────────
 function useTheme(){
   var _ref=useState(DT),T=_ref[0],setT=_ref[1];
-  function upT(k,v){setT(function(p){return Object.assign({},p,{[k]:v});});}
+  function upT(k,v){setT(function(p){var n=Object.assign({},p);n[k]=v;return n;});}
   function resetT(){setT(DT);}
   return{T:T,upT:upT,resetT:resetT};
 }
@@ -107,8 +134,6 @@ function useBP(){
   useEffect(function(){function fn(){var w=window.innerWidth;setBp(w<480?"xs":w<768?"sm":w<1024?"md":"lg");}window.addEventListener("resize",fn);return function(){window.removeEventListener("resize",fn);};},[]);
   return{bp:bp,isMobile:bp==="xs"||bp==="sm"};
 }
-
-// ── DATA HOOKS ────────────────────────────────────────────────────────────────
 function useChantiers(){
   var _r=useState([]),data=_r[0],setData=_r[1];
   var _l=useState(true),loading=_l[0],setLoading=_l[1];
@@ -131,20 +156,12 @@ function useInterventions(){
   var _l=useState(true),loading=_l[0],setLoading=_l[1];
   var load=useCallback(function(){
     setLoading(true);
-    Promise.all([
-      q("interventions").order("created_at",{ascending:false}).get(),
-      q("intervention_depenses").order("date",{ascending:false}).get()
-    ]).then(function(res){
-      var intv=res[0].data||[],idep=res[1].data||[];
-      setData(intv.map(function(i){
-        return Object.assign({},i,{
-          depenses:idep
-            .filter(function(d){return String(d.intervention_id)===String(i.id);})
-            .map(function(d){return Object.assign({},d,{montant:Number(d.montant||0)});})
-        });
-      }));
-      setLoading(false);
-    }).catch(function(e){console.error(e);setLoading(false);});
+    Promise.all([q("interventions").order("created_at",{ascending:false}).get(),q("intervention_depenses").order("date",{ascending:false}).get()])
+      .then(function(res){
+        var intv=res[0].data||[],idep=res[1].data||[];
+        setData(intv.map(function(i){return Object.assign({},i,{depenses:idep.filter(function(d){return String(d.intervention_id)===String(i.id);}).map(function(d){return Object.assign({},d,{montant:Number(d.montant||0)});})});}));
+        setLoading(false);
+      }).catch(function(e){console.error(e);setLoading(false);});
   },[]);
   useEffect(function(){load();},[]);
   return{data:data,loading:loading,reload:load};
@@ -167,11 +184,11 @@ function useDebourse(){
 function Badge(p){return <span style={{background:p.color+"22",color:p.color,border:"1px solid "+p.color+"55",borderRadius:6,padding:p.small?"2px 7px":"3px 10px",fontSize:p.small?10:11,fontWeight:600,whiteSpace:"nowrap"}}>{p.label}</span>;}
 function PBar(p){return <div style={{background:"#57534E",borderRadius:99,height:p.h||8,overflow:"hidden"}}><div style={{width:Math.min(p.p,100)+"%",background:p.color,height:"100%",borderRadius:99,transition:"width .4s"}}/></div>;}
 function Empty(p){return <div style={{textAlign:"center",padding:"40px 20px",color:"#A8A29E"}}><div style={{fontSize:40,marginBottom:12}}>{p.icon}</div><div style={{fontSize:14}}>{p.msg}</div></div>;}
-function Spin(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:180,flexDirection:"column",gap:12}}><div style={{width:36,height:36,border:"4px solid #57534E",borderTopColor:"#F97316",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
-function Kpi(p){return <div style={{background:p.T.card,border:"1px solid "+p.T.border,borderRadius:p.compact?10:p.T.borderRadius,padding:p.compact?"12px 14px":"16px 20px",flex:1,minWidth:0}}><div style={{fontSize:p.compact?18:22,marginBottom:3}}>{p.icon}</div><div style={{fontSize:p.compact?15:20,fontWeight:700,color:p.color||p.T.white,lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.value}</div><div style={{fontSize:p.compact?10:12,color:p.T.muted,marginTop:2}}>{p.label}</div></div>;}
-function Card(p){return <div style={{background:p.T.card,border:"1px solid "+p.T.border,borderRadius:p.T.borderRadius,padding:"18px 20px"}}>{p.title&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}><div style={{fontWeight:700,fontSize:14}}>{p.title}</div>{p.action}</div>}{p.children}</div>;}
-function Modal(p){return <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}><div style={{background:p.T.card,border:"1px solid "+p.T.border,borderRadius:"20px 20px 0 0",padding:"24px 20px",width:"100%",maxWidth:860,maxHeight:"96vh",overflow:"auto"}}><div style={{width:40,height:4,background:p.T.border,borderRadius:99,margin:"0 auto 20px"}}/><div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}><div style={{fontWeight:800,fontSize:16}}>{p.title}</div><button onClick={p.onClose} style={{background:"none",border:"none",color:p.T.muted,cursor:"pointer",fontSize:22}}>✕</button></div>{p.children}{p.onSave&&<div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}><button onClick={p.onClose} style={{padding:"10px 20px",background:p.T.mid,color:p.T.white,border:"none",borderRadius:10,cursor:"pointer"}}>Annuler</button><button onClick={p.onSave} style={{padding:"10px 20px",background:p.T.primary,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer"}}>{p.saveLabel||"Enregistrer"}</button></div>}</div></div>;}
-function FF(p){var s={width:"100%",background:p.T.mid,border:"1px solid "+p.T.border,borderRadius:8,padding:"10px 12px",color:p.T.white,fontSize:14,boxSizing:"border-box",outline:"none"};return <div style={p.full?{gridColumn:"1/-1"}:{}}><label style={{fontSize:11,color:p.T.muted,display:"block",marginBottom:4}}>{p.label}</label>{p.rows?<textarea value={p.value||""} onChange={function(e){p.onChange(e.target.value);}} rows={p.rows} placeholder={p.placeholder} style={s}/>:<input type={p.type||"text"} value={p.value||""} onChange={function(e){p.onChange(e.target.value);}} placeholder={p.placeholder} style={s}/>}</div>;}
+function Spin(){return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:120,flexDirection:"column",gap:12}}><div style={{width:32,height:32,border:"4px solid #57534E",borderTopColor:"#F97316",borderRadius:"50%",animation:"spin 1s linear infinite"}}/><style>{"@keyframes spin{to{transform:rotate(360deg)}}"}</style></div>;}
+function Kpi(p){return <div style={{background:p.T.card,border:"1px solid "+p.T.border,borderRadius:p.compact?10:p.T.borderRadius,padding:p.compact?"12px 14px":"16px 20px",flex:1,minWidth:0}}><div style={{fontSize:p.compact?16:22,marginBottom:3}}>{p.icon}</div><div style={{fontSize:p.compact?14:20,fontWeight:700,color:p.color||p.T.white,lineHeight:1.2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.value}</div><div style={{fontSize:p.compact?10:12,color:p.T.muted,marginTop:2}}>{p.label}</div></div>;}
+function Card(p){return <div style={{background:p.T.card,border:"1px solid "+p.T.border,borderRadius:p.T.borderRadius,padding:"18px 20px"}}>{p.title&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}><div style={{fontWeight:700,fontSize:14}}>{p.title}</div>{p.action}</div>}{p.children}</div>;}
+function Modal(p){return <div style={{position:"fixed",inset:0,background:"#00000099",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"}}><div style={{background:p.T.card,border:"1px solid "+p.T.border,borderRadius:"20px 20px 0 0",padding:"24px 20px",width:"100%",maxWidth:960,maxHeight:"96vh",overflow:"auto"}}><div style={{width:40,height:4,background:p.T.border,borderRadius:99,margin:"0 auto 20px"}}/><div style={{display:"flex",justifyContent:"space-between",marginBottom:20}}><div style={{fontWeight:800,fontSize:16}}>{p.title}</div><button onClick={p.onClose} style={{background:"none",border:"none",color:p.T.muted,cursor:"pointer",fontSize:22}}>✕</button></div>{p.children}{p.onSave&&<div style={{display:"flex",gap:10,marginTop:20,justifyContent:"flex-end"}}><button onClick={p.onClose} style={{padding:"10px 20px",background:p.T.mid,color:p.T.white,border:"none",borderRadius:10,cursor:"pointer"}}>Annuler</button><button onClick={p.onSave} style={{padding:"10px 20px",background:p.T.primary,color:"#fff",border:"none",borderRadius:10,fontWeight:700,cursor:"pointer"}}>{p.saveLabel||"Enregistrer"}</button></div>}</div></div>;}
+function FF(p){var s={width:"100%",background:p.T.mid,border:"1px solid "+p.T.border,borderRadius:8,padding:"10px 12px",color:p.T.white,fontSize:14,boxSizing:"border-box",outline:"none"};return <div style={p.full?{gridColumn:"1/-1"}:{}}><label style={{fontSize:11,color:p.T.muted,display:"block",marginBottom:4}}>{p.label}</label>{p.rows?<textarea value={p.value||""} onChange={function(e){p.onChange(e.target.value);}} rows={p.rows} style={s}/>:<input type={p.type||"text"} value={p.value||""} onChange={function(e){p.onChange(e.target.value);}} placeholder={p.placeholder} style={s}/>}</div>;}
 function FS(p){return <div style={p.full?{gridColumn:"1/-1"}:{}}><label style={{fontSize:11,color:p.T.muted,display:"block",marginBottom:4}}>{p.label}</label><select value={p.value||""} onChange={function(e){p.onChange(e.target.value);}} style={{width:"100%",background:p.T.mid,border:"1px solid "+p.T.border,borderRadius:8,padding:"10px 12px",color:p.T.white,fontSize:14,boxSizing:"border-box",outline:"none"}}>{p.options.map(function(o){return Array.isArray(o)?<option key={o[0]} value={o[0]}>{o[1]}</option>:<option key={o} value={o}>{o}</option>;})}</select></div>;}
 function FG(p){return <div style={{display:"grid",gridTemplateColumns:"repeat("+(p.cols||2)+",1fr)",gap:12}}>{p.children}</div>;}
 
@@ -221,10 +238,8 @@ export default function App(){
   );
 }
 
-// ── DASHBOARD ─────────────────────────────────────────────────────────────────
 function Dashboard(p){
-  var ch=p.ch,intv=p.intv,openCh=p.openCh,T=p.T;
-  var isMobile=useBP().isMobile;
+  var ch=p.ch,intv=p.intv,openCh=p.openCh,T=p.T,isMobile=useBP().isMobile;
   var totalB=ch.reduce(function(a,c){return a+c.budgetInitial;},0);
   var totalD=ch.reduce(function(a,c){return a+totalDep(c);},0);
   var pc=pct(totalD,totalB);
@@ -235,25 +250,23 @@ function Dashboard(p){
       <Kpi icon="🏗️" label="Chantiers" value={ch.length} color={T.primary} compact={isMobile} T={T}/>
       <Kpi icon="💰" label="Budget total" value={fmtS(totalB)} compact={isMobile} T={T}/>
       <Kpi icon="📊" label="Consomme" value={pc+"%"} color={pc>80?T.danger:T.success} compact={isMobile} T={T}/>
-      <Kpi icon="🔧" label="Interventions" value={intv.filter(function(i){return i.statut==="En cours";}).length} color={T.secondary} compact={isMobile} T={T}/>
+      <Kpi icon="🔧" label="Interv. actives" value={intv.filter(function(i){return i.statut==="En cours";}).length} color={T.secondary} compact={isMobile} T={T}/>
     </div>
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16}}>
-      <Card title="Statuts chantiers" T={T}>{pieData.length>0?<ResponsiveContainer width="100%" height={180}><PieChart><Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={65} label={function(e){return e.name+" ("+e.value+")";}  }>{pieData.map(function(d,i){return <Cell key={i} fill={d.color}/>;})}</Pie><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/></PieChart></ResponsiveContainer>:<Empty msg="Aucun chantier" icon="🏗️"/>}</Card>
+      <Card title="Statuts chantiers" T={T}>{pieData.length>0?<ResponsiveContainer width="100%" height={180}><PieChart><Pie data={pieData} dataKey="value" cx="50%" cy="50%" outerRadius={65} label={function(e){return e.name+" ("+e.value+")"}}>{pieData.map(function(d,i){return <Cell key={i} fill={d.color}/>;})}</Pie><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/></PieChart></ResponsiveContainer>:<Empty msg="Aucun chantier" icon="🏗️"/>}</Card>
       <Card title="Chantiers actifs" T={T}>{actifs.slice(0,6).map(function(c){var d=totalDep(c),p2=pct(d,c.budgetInitial);return <div key={c.id} onClick={function(){openCh(c.id);}} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderBottom:"1px solid "+T.border,cursor:"pointer"}}><div style={{flex:2}}><div style={{fontWeight:600,fontSize:13}}>{c.nom}</div><div style={{fontSize:11,color:T.muted}}>{c.client}</div></div><div style={{flex:1}}><PBar p={p2} color={p2>100?T.danger:p2>80?T.warning:T.success} h={6}/><div style={{fontSize:10,color:T.muted,textAlign:"right",marginTop:2}}>{p2}%</div></div></div>;})} {actifs.length===0&&<Empty msg="Aucun chantier actif" icon="🏗️"/>}</Card>
     </div>
   </div>;
 }
 
-// ── CHANTIERS ─────────────────────────────────────────────────────────────────
 function Chantiers(p){
-  var ch=p.ch,openCh=p.openCh,reload=p.reload,T=p.T;
-  var isMobile=useBP().isMobile;
+  var ch=p.ch,openCh=p.openCh,reload=p.reload,T=p.T,isMobile=useBP().isMobile;
   var _f=useState("Tous"),filter=_f[0],setFilter=_f[1];
   var _n=useState(false),showNew=_n[0],setShowNew=_n[1];
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
   var _fm=useState({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",date_debut:"",date_fin:""}),form=_fm[0],setForm=_fm[1];
-  function up(k,v){setForm(function(p2){return Object.assign({},p2,{[k]:v});});}
-  function save(){if(!form.nom||!form.budget_initial)return;setSaving(true);q("chantiers").insert({nom:form.nom,client:form.client,localisation:form.localisation,type:form.type,budget_initial:parseFloat(form.budget_initial),date_debut:form.date_debut||null,date_fin:form.date_fin||null,statut:"Brouillon",alertes:[],score:100,lat:5.35,lng:-4.0}).then(function(){setSaving(false);setShowNew(false);setForm({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",date_debut:"",date_fin:""});reload();});}
+  function up(k,v){setForm(function(p2){var n=Object.assign({},p2);n[k]=v;return n;});}
+  function save(){if(!form.nom||!form.budget_initial)return;setSaving(true);q("chantiers").insert({nom:form.nom,client:form.client,localisation:form.localisation,type:form.type,budget_initial:parseFloat(form.budget_initial),date_debut:form.date_debut||null,date_fin:form.date_fin||null,statut:"Brouillon",alertes:[],score:100,lat:5.35,lng:-4.0}).then(function(){setSaving(false);setShowNew(false);reload();});}
   function del(id){if(!window.confirm("Supprimer ?"))return;q("chantiers").eq("id",id).del().then(function(){reload();});}
   var filtered=filter==="Tous"?ch:ch.filter(function(c){return c.statut===filter;});
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -261,7 +274,7 @@ function Chantiers(p){
       <div style={{display:"flex",gap:4,overflowX:"auto"}}>{["Tous"].concat(STATUTS_CH).map(function(s){return <button key={s} onClick={function(){setFilter(s);}} style={{padding:"6px 12px",borderRadius:20,border:"1px solid "+(filter===s?T.primary:T.border),background:filter===s?T.primary:"transparent",color:filter===s?"#fff":T.muted,cursor:"pointer",fontSize:12,fontWeight:filter===s?700:400,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>;})}</div>
       <button onClick={function(){setShowNew(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Nouveau</button>
     </div>
-    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(320px,1fr))",gap:14}}>
+    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
       {filtered.map(function(c){var d=totalDep(c),pp=pct(d,c.budgetInitial);return <div key={c.id} onClick={function(){openCh(c.id);}} style={{background:T.card,border:"1px solid "+(pp>100?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:16,cursor:"pointer",position:"relative"}}><button onClick={function(e){e.stopPropagation();del(c.id);}} style={{position:"absolute",top:12,right:12,background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer"}}>✕</button><div style={{marginBottom:10,paddingRight:60}}><div style={{fontWeight:700,fontSize:15}}>{c.nom}</div><div style={{fontSize:12,color:T.muted}}>{c.client} - {c.localisation}</div></div><div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}><Badge label={c.statut} color={stC(c.statut,T)}/><Badge label={c.type} color={T.primary} small/></div><div style={{marginBottom:4}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{color:T.muted}}>Budget consomme</span><span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span></div><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success}/></div><div style={{marginTop:8,paddingTop:8,borderTop:"1px solid "+T.border,fontSize:12,color:T.muted}}>{fmtS(d)} / {fmtS(c.budgetInitial)} XOF</div></div>;})}
     </div>
     {filtered.length===0&&<Empty msg="Aucun chantier" icon="🏗️"/>}
@@ -269,10 +282,8 @@ function Chantiers(p){
   </div>;
 }
 
-// ── FICHE CHANTIER ────────────────────────────────────────────────────────────
 function Fiche(p){
-  var c=p.chantier,setPage=p.setPage,reload=p.reload,T=p.T;
-  var isMobile=useBP().isMobile;
+  var c=p.chantier,setPage=p.setPage,reload=p.reload,T=p.T,isMobile=useBP().isMobile;
   var _t=useState("infos"),tab=_t[0],setTab=_t[1];
   var _sd=useState(false),showDep=_sd[0],setShowDep=_sd[1];
   var _fd=useState({libelle:"",categorie:"Main d'oeuvre",montant:"",date:today(),note:""}),fDep=_fd[0],setFDep=_fd[1];
@@ -281,32 +292,31 @@ function Fiche(p){
   var dep=totalDep(c),dp=pct(dep,c.budgetInitial);
   var filtered=fCat==="Toutes"?c.depenses:c.depenses.filter(function(d){return d.categorie===fCat;});
   function changeSt(st){q("chantiers").eq("id",c.id).update({statut:st}).then(function(){reload();});}
-  function addDep(){if(!fDep.libelle||!fDep.montant)return;setSaving(true);q("depenses").insert({chantier_id:c.id,libelle:fDep.libelle,categorie:fDep.categorie,montant:parseFloat(fDep.montant),date:fDep.date,note:fDep.note}).then(function(){setSaving(false);setShowDep(false);setFDep({libelle:"",categorie:"Main d'oeuvre",montant:"",date:today(),note:""});reload();});}
+  function addDep(){if(!fDep.libelle||!fDep.montant)return;setSaving(true);q("depenses").insert({chantier_id:c.id,libelle:fDep.libelle,categorie:fDep.categorie,montant:parseFloat(fDep.montant),date:fDep.date,note:fDep.note}).then(function(){setSaving(false);setShowDep(false);reload();});}
   function delDep(id){q("depenses").eq("id",id).del().then(function(){reload();});}
   var depCatData=CATS.map(function(cat){return{cat:cat.split(" ")[0],total:c.depenses.filter(function(d){return d.categorie===cat;}).reduce(function(a,d){return a+d.montant;},0)};}).filter(function(x){return x.total>0;});
   return <div style={{display:"flex",flexDirection:"column",gap:0}}>
     <button onClick={function(){setPage("chantiers");}} style={{background:"none",border:"none",color:T.primary,cursor:"pointer",fontSize:13,marginBottom:12,textAlign:"left",padding:0}}>← Retour</button>
     <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:isMobile?16:20,marginBottom:16}}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:12}}><div style={{flex:1}}><div style={{fontSize:isMobile?18:22,fontWeight:800}}>{c.nom}</div><div style={{color:T.muted,fontSize:12,marginTop:4}}>{c.client} - {c.localisation}</div></div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{STATUTS_CH.map(function(st){return <button key={st} onClick={function(){changeSt(st);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(c.statut===st?stC(st,T):T.border),background:c.statut===st?stC(st,T)+"22":"transparent",color:c.statut===st?stC(st,T):T.muted,cursor:"pointer",fontSize:10,fontWeight:c.statut===st?700:400}}>{st}</button>;})}</div></div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:12,flexWrap:"wrap"}}><div style={{flex:1}}><div style={{fontSize:isMobile?18:22,fontWeight:800}}>{c.nom}</div><div style={{color:T.muted,fontSize:12,marginTop:4}}>{c.client} - {c.localisation}</div></div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{STATUTS_CH.map(function(st){return <button key={st} onClick={function(){changeSt(st);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(c.statut===st?stC(st,T):T.border),background:c.statut===st?stC(st,T)+"22":"transparent",color:c.statut===st?stC(st,T):T.muted,cursor:"pointer",fontSize:10,fontWeight:c.statut===st?700:400}}>{st}</button>;})}</div></div>
       <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}><Badge label={c.statut} color={stC(c.statut,T)}/><Badge label={c.type} color={T.primary} small/><div style={{marginLeft:"auto",display:"flex",gap:6}}><button onClick={function(){exportChantierCSV(c);}} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>CSV</button><button onClick={function(){exportChantierHTML(c,T);}} style={{background:T.primary+"22",color:T.primary,border:"1px solid "+T.primary+"44",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>PDF</button></div></div>
     </div>
     <div style={{display:"flex",gap:4,marginBottom:16,overflowX:"auto"}}>{[["infos","Infos"],["budget","Budget"],["depenses","Depenses ("+c.depenses.length+")"],["graphiques","Graphiques"]].map(function(o){return <button key={o[0]} onClick={function(){setTab(o[0]);}} style={{padding:"8px 14px",borderRadius:8,border:"1px solid "+(tab===o[0]?T.primary:T.border),background:tab===o[0]?T.primary:T.card,color:tab===o[0]?"#fff":T.muted,cursor:"pointer",fontSize:12,fontWeight:tab===o[0]?700:400,whiteSpace:"nowrap",flexShrink:0}}>{o[1]}</button>;})}  </div>
     {tab==="infos"&&<div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}><Card title="Informations" T={T}>{[["Nom",c.nom],["Client",c.client],["Localisation",c.localisation],["Type",c.type],["Statut",c.statut],["Debut",c.date_debut||"-"],["Fin prevue",c.date_fin||"-"]].map(function(row){return <div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+T.border,fontSize:13,gap:8}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:600}}>{row[1]}</span></div>;})}</Card><Card title="Synthese" T={T}><div style={{marginBottom:14}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:T.muted}}>Avancement budget</span><strong style={{color:dp>100?T.danger:dp>80?T.warning:T.success}}>{dp}%</strong></div><PBar p={dp} color={dp>100?T.danger:dp>80?T.warning:T.success} h={14}/></div>{[["Budget initial",fmt(c.budgetInitial),T.white],["Depenses",fmt(dep),T.warning],["Marge",fmt(c.budgetInitial-dep),c.budgetInitial-dep>=0?T.success:T.danger]].map(function(row){return <div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+T.border,fontSize:13}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:700,color:row[2]}}>{row[1]}</span></div>;})}</Card></div>}
     {tab==="budget"&&<div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}><Kpi icon="💰" label="Budget" value={fmtS(c.budgetInitial)} compact T={T}/><Kpi icon="🧾" label="Depenses" value={fmtS(dep)} color={T.warning} compact T={T}/><Kpi icon="💵" label="Marge" value={fmtS(c.budgetInitial-dep)} color={c.budgetInitial-dep>=0?T.success:T.danger} compact T={T}/><Kpi icon="📊" label="Consomme" value={dp+"%"} color={dp>100?T.danger:dp>80?T.warning:T.success} compact T={T}/></div>}
     {tab==="depenses"&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
-      <div style={{display:"flex",gap:6,justifyContent:"space-between",flexWrap:"wrap"}}><div style={{display:"flex",gap:4,overflowX:"auto"}}>{["Toutes"].concat(CATS).map(function(cat){return <button key={cat} onClick={function(){setFCat(cat);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(fCat===cat?T.primary:T.border),background:fCat===cat?T.primary:"transparent",color:fCat===cat?"#fff":T.muted,cursor:"pointer",fontSize:10,whiteSpace:"nowrap",flexShrink:0}}>{cat}</button>;})}</div><div style={{display:"flex",gap:6}}><button onClick={function(){exportChantierCSV(c);}} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:8,padding:"7px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>CSV</button><button onClick={function(){setShowDep(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Depense</button></div></div>
+      <div style={{display:"flex",gap:6,justifyContent:"space-between",flexWrap:"wrap"}}><div style={{display:"flex",gap:4,overflowX:"auto"}}>{["Toutes"].concat(CATS).map(function(cat){return <button key={cat} onClick={function(){setFCat(cat);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(fCat===cat?T.primary:T.border),background:fCat===cat?T.primary:"transparent",color:fCat===cat?"#fff":T.muted,cursor:"pointer",fontSize:10,whiteSpace:"nowrap",flexShrink:0}}>{cat}</button>;})}</div><button onClick={function(){setShowDep(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Depense</button></div>
       {filtered.length===0&&<Empty msg="Aucune depense" icon="🧾"/>}
-      {filtered.map(function(d){return <div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{d.libelle}</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}><Badge label={d.categorie} color={catC(d.categorie,T)} small/><span style={{fontSize:10,color:T.muted}}>{d.date}</span>{d.note&&<span style={{fontSize:10,color:T.muted}}>- {d.note}</span>}</div></div><div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{fontWeight:800,color:T.primary,fontSize:14}}>{fmt(d.montant)}</span><button onClick={function(){delDep(d.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>✕</button></div></div>;})}
-      {showDep&&<Modal title="Nouvelle depense" onClose={function(){setShowDep(false);}} onSave={addDep} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Libelle *" value={fDep.libelle} onChange={function(v){setFDep(function(pp){return Object.assign({},pp,{libelle:v});});}} full T={T}/><FS label="Categorie" value={fDep.categorie} onChange={function(v){setFDep(function(pp){return Object.assign({},pp,{categorie:v});});}} options={CATS} T={T}/><FF label="Montant (XOF)" type="number" value={fDep.montant} onChange={function(v){setFDep(function(pp){return Object.assign({},pp,{montant:v});});}} T={T}/><FF label="Date" type="date" value={fDep.date} onChange={function(v){setFDep(function(pp){return Object.assign({},pp,{date:v});});}} T={T}/><FF label="Note" value={fDep.note} onChange={function(v){setFDep(function(pp){return Object.assign({},pp,{note:v});});}} full T={T}/></FG>}</Modal>}
+      {filtered.map(function(d){return <div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:10,padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{d.libelle}</div><div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:4}}><Badge label={d.categorie} color={catC(d.categorie,T)} small/><span style={{fontSize:10,color:T.muted}}>{d.date}</span></div></div><div style={{display:"flex",gap:6,alignItems:"center"}}><span style={{fontWeight:800,color:T.primary,fontSize:14}}>{fmt(d.montant)}</span><button onClick={function(){delDep(d.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>✕</button></div></div>;})}
+      {showDep&&<Modal title="Nouvelle depense" onClose={function(){setShowDep(false);}} onSave={addDep} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Libelle *" value={fDep.libelle} onChange={function(v){setFDep(function(pp){var n=Object.assign({},pp);n.libelle=v;return n;});}} full T={T}/><FS label="Categorie" value={fDep.categorie} onChange={function(v){setFDep(function(pp){var n=Object.assign({},pp);n.categorie=v;return n;});}} options={CATS} T={T}/><FF label="Montant (XOF)" type="number" value={fDep.montant} onChange={function(v){setFDep(function(pp){var n=Object.assign({},pp);n.montant=v;return n;});}} T={T}/><FF label="Date" type="date" value={fDep.date} onChange={function(v){setFDep(function(pp){var n=Object.assign({},pp);n.date=v;return n;});}} T={T}/><FF label="Note" value={fDep.note} onChange={function(v){setFDep(function(pp){var n=Object.assign({},pp);n.note=v;return n;});}} full T={T}/></FG>}</Modal>}
     </div>}
-    {tab==="graphiques"&&depCatData.length>0&&<Card title="Repartition des depenses" T={T}><ResponsiveContainer width="100%" height={220}><BarChart data={depCatData} layout="vertical" margin={{left:0,right:10}}><XAxis type="number" tick={{fill:T.muted,fontSize:9}} tickFormatter={function(v){return fmtS(v);}}/><YAxis type="category" dataKey="cat" tick={{fill:T.muted,fontSize:10}} width={70}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}} formatter={function(v){return fmt(v);}}/><Bar dataKey="total" radius={[0,4,4,0]}>{depCatData.map(function(d,i){return <Cell key={i} fill={catC(d.cat,T)}/>;})}</Bar></BarChart></ResponsiveContainer></Card>}
+    {tab==="graphiques"&&depCatData.length>0&&<Card title="Repartition des depenses" T={T}><ResponsiveContainer width="100%" height={220}><BarChart data={depCatData} layout="vertical"><XAxis type="number" tick={{fill:T.muted,fontSize:9}} tickFormatter={function(v){return fmtS(v);}}/><YAxis type="category" dataKey="cat" tick={{fill:T.muted,fontSize:10}} width={70}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}} formatter={function(v){return fmt(v);}}/><Bar dataKey="total" radius={[0,4,4,0]}>{depCatData.map(function(d,i){return <Cell key={i} fill={catC(d.cat,T)}/>;})}</Bar></BarChart></ResponsiveContainer></Card>}
   </div>;
 }
 
-// ── DEBOURS SEC ───────────────────────────────────────────────────────────────
+// ── DEBOURS ───────────────────────────────────────────────────────────────────
 function Debourse(p){
-  var sessions=p.sessions,taches=p.taches,ch=p.ch,reload=p.reload,T=p.T;
-  var isMobile=useBP().isMobile;
+  var sessions=p.sessions,taches=p.taches,ch=p.ch,reload=p.reload,T=p.T,isMobile=useBP().isMobile;
   var _s=useState(null),selSid=_s[0],setSelSid=_s[1];
   var _n=useState(false),showNewS=_n[0],setShowNewS=_n[1];
   var _ia=useState(false),showIA=_ia[0],setShowIA=_ia[1];
@@ -314,24 +324,275 @@ function Debourse(p){
   var _f=useState({nom:"",chantier_id:"",taux_charges:40,coeff_fg:15,coeff_benef:10}),sForm=_f[0],setSForm=_f[1];
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
   var selSess=sessions.find(function(s){return s.id===selSid;});
-  var selTaches=selSid?taches.filter(function(t){return t.session_id===selSid;}) :[];
+  var selTaches=selSid?taches.filter(function(t){return t.session_id===selSid;}):[];
   function saveSession(){if(!sForm.nom)return;setSaving(true);q("debourse_sessions").insert({nom:sForm.nom,chantier_id:sForm.chantier_id||null,taux_charges:parseFloat(sForm.taux_charges),coeff_fg:parseFloat(sForm.coeff_fg),coeff_benef:parseFloat(sForm.coeff_benef)}).then(function(r){setSaving(false);setShowNewS(false);reload();if(r.data)setSelSid(r.data.id);});}
   function delSession(id){if(!window.confirm("Supprimer ?"))return;q("debourse_taches").eq("session_id",id).del().then(function(){q("debourse_sessions").eq("id",id).del().then(function(){setSelSid(null);reload();});});}
-  function updateCfg(k,v){if(!selSid)return;q("debourse_sessions").eq("id",selSid).update({[k]:parseFloat(v)||0}).then(function(){reload();});}
+  function updateCfg(k,v){if(!selSid)return;var u={};u[k]=parseFloat(v)||0;q("debourse_sessions").eq("id",selSid).update(u).then(function(){reload();});}
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
-    <Card title="Sessions de debours" action={<div style={{display:"flex",gap:6}}><button onClick={function(){setShowAD(true);}} style={{background:"#A855F722",color:"#A855F7",border:"1px solid #A855F744",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>📂 Analyser doc</button><button onClick={function(){setShowIA(true);}} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>🤖 IA Ouvrage</button><button onClick={function(){setShowNewS(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button></div>} T={T}>
-      {sessions.length===0?<Empty msg="Aucune session — creez-en une" icon="🔢"/>:<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+    <Card title="Sessions de debours" action={<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      <button onClick={function(){setShowAD(true);}} style={{background:"#A855F722",color:"#A855F7",border:"1px solid #A855F744",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>📂 Analyser doc</button>
+      <button onClick={function(){setShowIA(true);}} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>🤖 IA Ouvrage</button>
+      <button onClick={function(){setShowNewS(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button>
+    </div>} T={T}>
+      {sessions.length===0?<Empty msg="Aucune session" icon="🔢"/>:<div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
         {sessions.map(function(s){var sts=taches.filter(function(t){return t.session_id===s.id;});var tot=sts.reduce(function(a,t){return a+(t.prix_vente_total||0);},0);var active=selSid===s.id;return <div key={s.id} onClick={function(){setSelSid(s.id);}} style={{background:active?T.primary+"22":T.mid,border:"2px solid "+(active?T.primary:T.border),borderRadius:10,padding:"12px 16px",cursor:"pointer",minWidth:180,flexShrink:0}}><div style={{fontWeight:700,fontSize:13,color:active?T.primary:T.white}}>{s.nom}</div><div style={{fontSize:11,color:T.muted,marginTop:4}}>{sts.length} tache(s)</div><div style={{fontSize:13,fontWeight:700,color:T.success,marginTop:4}}>{fmtS(tot)} XOF</div><button onClick={function(e){e.stopPropagation();delSession(s.id);}} style={{marginTop:8,background:T.danger+"22",border:"none",color:T.danger,borderRadius:6,padding:"3px 8px",fontSize:10,cursor:"pointer"}}>Supprimer</button></div>;})}
       </div>}
     </Card>
     {selSess&&<SessionDetail sess={selSess} taches={selTaches} reload={reload} T={T} isMobile={isMobile} updateCfg={updateCfg} ch={ch}/>}
-    {showNewS&&<Modal title="Nouvelle session" onClose={function(){setShowNewS(false);}} onSave={saveSession} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Nom *" value={sForm.nom} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{nom:v});});}} full T={T}/><FS label="Chantier" value={sForm.chantier_id} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{chantier_id:v});});}} options={[["","- Aucun -"]].concat(ch.map(function(c){return[c.id,c.nom];}))  } full T={T}/><FF label="Charges (%)" type="number" value={sForm.taux_charges} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{taux_charges:v});});}} T={T}/><FF label="FG (%)" type="number" value={sForm.coeff_fg} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{coeff_fg:v});});}} T={T}/><FF label="Benefice (%)" type="number" value={sForm.coeff_benef} onChange={function(v){setSForm(function(pp){return Object.assign({},pp,{coeff_benef:v});});}} T={T}/></FG>}</Modal>}
+    {showNewS&&<Modal title="Nouvelle session" onClose={function(){setShowNewS(false);}} onSave={saveSession} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Nom *" value={sForm.nom} onChange={function(v){setSForm(function(pp){var n=Object.assign({},pp);n.nom=v;return n;});}} full T={T}/><FS label="Chantier" value={sForm.chantier_id} onChange={function(v){setSForm(function(pp){var n=Object.assign({},pp);n.chantier_id=v;return n;});}} options={[["","- Aucun -"]].concat(ch.map(function(c){return[c.id,c.nom];}))} full T={T}/><FF label="Charges (%)" type="number" value={sForm.taux_charges} onChange={function(v){setSForm(function(pp){var n=Object.assign({},pp);n.taux_charges=v;return n;});}} T={T}/><FF label="FG (%)" type="number" value={sForm.coeff_fg} onChange={function(v){setSForm(function(pp){var n=Object.assign({},pp);n.coeff_fg=v;return n;});}} T={T}/><FF label="Benefice (%)" type="number" value={sForm.coeff_benef} onChange={function(v){setSForm(function(pp){var n=Object.assign({},pp);n.coeff_benef=v;return n;});}} T={T}/></FG>}</Modal>}
     {showIA&&<IAOuvrageModal onClose={function(){setShowIA(false);}} sessions={sessions} reload={reload} T={T}/>}
-    {showAD&&<AnalyseDocModal onClose={function(){setShowAD(false);}} T={T}/>}
+    {showAD&&<AnalyseDocModal onClose={function(){setShowAD(false);}} sessions={sessions} reload={reload} ch={ch} T={T}/>}
   </div>;
 }
 
-// ── IA OUVRAGE MODAL ──────────────────────────────────────────────────────────
+// ── ANALYSE DOC INTELLIGENTE → PROJET DEBOURS ────────────────────────────────
+function AnalyseDocModal(p){
+  var onClose=p.onClose,sessions=p.sessions,reload=p.reload,ch=p.ch,T=p.T;
+  var _l=useState(false),loading=_l[0],setLoading=_l[1];
+  var _e=useState(null),err=_e[0],setErr=_e[1];
+  var _msg=useState(""),msg=_msg[0],setMsg=_msg[1];
+  var _postes=useState([]),postes=_postes[0],setPostes=_postes[1];
+  var _vals=useState({}),vals=_vals[0],setVals=_vals[1];
+  var _imp=useState(false),importing=_imp[0],setImporting=_imp[1];
+  var _done=useState(false),done=_done[0],setDone=_done[1];
+  var _sess=useState(""),selSess=_sess[0],setSelSess=_sess[1];
+  var _snom=useState(""),sessNom=_snom[0],setSessNom=_snom[1];
+  var _prog=useState(0),prog=_prog[0],setProg=_prog[1];
+  var fileRef=useRef();
+
+  function evalFormule(formule,vars2,valsMap,pi,ei){
+    try{
+      var scope={};
+      (vars2||[]).forEach(function(v){scope[v.nom]=parseFloat(valsMap["p"+pi+"_e"+ei+"_"+v.nom])||0;});
+      var fn=new Function(...Object.keys(scope),"return ("+formule+")");
+      var res=fn(...Object.values(scope));
+      return isFinite(res)?Math.round(res*100)/100:0;
+    }catch(e){return 0;}
+  }
+  function setVal(key,v){setVals(function(pp){var n=Object.assign({},pp);n[key]=v;return n;});}
+
+  async function analyseDoc(file){
+    setLoading(true);setErr(null);setPostes([]);setVals({});setDone(false);setProg(0);
+    try{
+      setMsg("📄 Lecture du document...");
+      var texte="";
+      var isPDF=file.type==="application/pdf",isImg=file.type.indexOf("image/")===0;
+      if(isPDF||isImg){
+        var b64=await new Promise(function(res,rej){var r=new FileReader();r.onload=function(e){res(e.target.result.split(",")[1]);};r.onerror=rej;r.readAsDataURL(file);});
+        var cb=isPDF?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
+        var d0=await aiCall({model:AI_MODEL,max_tokens:6000,messages:[{role:"user",content:[cb,{type:"text",text:"Extrais TOUT le contenu texte de ce document BTP : postes, sous-postes, quantités, unités, prix unitaires. Retourne le texte brut complet."}]}]});
+        texte=(d0.content||[]).map(function(i){return i.text||"";}).join("");
+      } else if(file.name.match(/\.(xlsx|xls)$/i)){
+        var SheetJS=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
+        var buf=await file.arrayBuffer();
+        var wb=SheetJS.read(buf,{type:"array"});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        texte=SheetJS.utils.sheet_to_csv(ws);
+      } else {texte=await file.text();}
+
+      setMsg("🔍 Identification des postes du document...");
+      var prom1="Expert BTP Côte d'Ivoire. Analyse ce document BTP et liste TOUS les postes et sous-postes avec leurs quantités et unités.\n"
+        +"Réponds UNIQUEMENT en JSON: {\"postes\":[{\"libelle\":\"Fouilles en rigole\",\"unite\":\"m3\",\"quantite\":25.5,\"prixDoc\":0}]}\n"
+        +"Inclus TOUS les postes même petits. Max 20. Quantités du document si disponibles. JSON pur.\n"
+        +"DOCUMENT:\n"+texte.slice(0,5000);
+      var r1=await aiCall({model:AI_MODEL,max_tokens:2000,messages:[{role:"user",content:prom1}]});
+      var t1=(r1.content||[]).map(function(i){return i.text||"";}).join("");
+      var p1=safeParseJSON(t1);
+      if(!p1)throw new Error("Impossible d'identifier les postes");
+      var postesBase=p1.postes||[];
+      if(!postesBase.length)throw new Error("Aucun poste trouvé");
+
+      var ps=[],iv={};
+      for(var pi=0;pi<Math.min(postesBase.length,15);pi++){
+        var pb=postesBase[pi];
+        setProg(Math.round((pi/Math.min(postesBase.length,15))*100));
+        setMsg("🔧 Décomposition "+(pi+1)+"/"+Math.min(postesBase.length,15)+" : "+pb.libelle);
+        var prom2="Expert BTP CI. Décompose ce poste BTP avec détails complets des composants.\n"
+          +"Poste: \""+pb.libelle+"\" | Unité: "+(pb.unite||"U")+" | Quantité doc: "+(pb.quantite||1)+"\n\n"
+          +"RÈGLES IMPORTANTES:\n"
+          +"- Pour BÉTON: décompose en sable(m3), ciment(sacs 50kg), gravier(m3), eau(L), main d'oeuvre, vibration\n"
+          +"- Pour FOUILLES: main d'oeuvre ou engin, évacuation terres\n"
+          +"- Pour MAÇONNERIE: agglos, mortier(sable+ciment), main d'oeuvre\n"
+          +"- Pour FERRAILLAGE: acier HA(kg/m3), ligature, main d'oeuvre\n"
+          +"- Pour COFFRAGE: bois, clous, décoffrant, main d'oeuvre\n"
+          +"- Pour ENDUIT: sable, ciment, main d'oeuvre\n"
+          +"- Valeurs RÉALISTES XOF CI: sable=15000/m3, ciment=7500/sac, gravier=18000/m3, manoeuvre=4500/j, macon=7000/j\n\n"
+          +"Réponds UNIQUEMENT en JSON:\n"
+          +"{\"elements\":[{\"libelle\":\"Ciment CPA 325\",\"categorie\":\"Materiaux\",\"formule\":\"dosage_ciment*prix_sac\",\"description\":\"Dosage béton C25: 350kg/m3 = 7 sacs × prix sac\",\"vars\":[{\"nom\":\"dosage_ciment\",\"label\":\"Nb sacs ciment/m3\",\"valeur\":7,\"unite\":\"sacs\"},{\"nom\":\"prix_sac\",\"label\":\"Prix sac 50kg\",\"valeur\":7500,\"unite\":\"XOF\"}]}]}\n"
+          +"3-6 éléments. Formules simples. JSON pur.";
+        try{
+          var r2=await aiCall({model:AI_MODEL,max_tokens:2500,messages:[{role:"user",content:prom2}]});
+          var t2=(r2.content||[]).map(function(i){return i.text||"";}).join("");
+          var p2=safeParseJSON(t2);
+          var elements=p2?p2.elements||[]:[];
+          var poste={libelle:pb.libelle,unite:pb.unite||"U",quantite:pb.quantite||1,prixDoc:pb.prixDoc||0,elements:elements};
+          ps.push(poste);
+          elements.forEach(function(el,ei){
+            (el.vars||[]).forEach(function(v){iv["p"+pi+"_e"+ei+"_"+v.nom]=v.valeur;});
+          });
+        }catch(e){ps.push({libelle:pb.libelle,unite:pb.unite||"U",quantite:pb.quantite||1,elements:[]});}
+      }
+      setProg(100);setPostes(ps);setVals(iv);
+      setSessNom(file.name.replace(/\.[^.]+$/,"").slice(0,40));
+      setMsg("");
+    }catch(e){setErr(e.message);}
+    setLoading(false);
+  }
+
+  async function genererProjet(){
+    if(!sessNom.trim()){alert("Donnez un nom à la session");return;}
+    setImporting(true);
+    try{
+      // Créer session
+      var cfg={taux_charges:40,coeff_fg:15,coeff_benef:10};
+      var rs=await q("debourse_sessions").insert({nom:sessNom,chantier_id:null,taux_charges:cfg.taux_charges,coeff_fg:cfg.coeff_fg,coeff_benef:cfg.coeff_benef});
+      if(!rs.data||rs.error)throw new Error("Erreur création session");
+      var sid=rs.data.id;
+      var ordre=0;
+      for(var pi=0;pi<postes.length;pi++){
+        var po=postes[pi];
+        var qte=po.quantite||1;
+        // Calculer totaux pour ce poste
+        var totMO=0,totMat=0,totMateriel=0,totST=0;
+        (po.elements||[]).forEach(function(el,ei){
+          var res=evalFormule(el.formule,el.vars,vals,pi,ei);
+          var cat=el.categorie||"";
+          if(cat==="MO")totMO+=res;
+          else if(cat==="Materiaux")totMat+=res;
+          else if(cat==="Materiel")totMateriel+=res;
+          else totST+=res;
+        });
+        var ds=totMO+totMat+totMateriel+totST;
+        var fg=ds*(cfg.coeff_fg/100);
+        var pr=ds+fg;
+        var pv=pr*(1+cfg.coeff_benef/100);
+        // Insérer tâche principale
+        await q("debourse_taches").insert({session_id:sid,libelle:po.libelle,unite:po.unite,quantite:qte,salaire:totMO,rendement:1,materiau:totMat,materiel:totMateriel,sous_traitance:totST,main_oeuvre_u:Math.round(totMO),debourse_sec_u:Math.round(ds),prix_revient_u:Math.round(pr),prix_vente_u:Math.round(pv),prix_vente_total:Math.round(pv*qte),ordre:ordre++});
+        // Insérer sous-éléments en tant que lignes détail
+        for(var ei=0;ei<(po.elements||[]).length;ei++){
+          var el=po.elements[ei];
+          var res2=evalFormule(el.formule,el.vars,vals,pi,ei);
+          var isMO=el.categorie==="MO";
+          await q("debourse_taches").insert({session_id:sid,libelle:"  └ "+el.libelle,unite:"U",quantite:qte,salaire:isMO?res2:0,rendement:1,materiau:el.categorie==="Materiaux"?res2:0,materiel:el.categorie==="Materiel"?res2:0,sous_traitance:el.categorie==="Sous-traitance"?res2:0,main_oeuvre_u:isMO?Math.round(res2):0,debourse_sec_u:Math.round(res2),prix_revient_u:Math.round(res2*(1+cfg.coeff_fg/100)),prix_vente_u:Math.round(res2*(1+cfg.coeff_fg/100)*(1+cfg.coeff_benef/100)),prix_vente_total:Math.round(res2*(1+cfg.coeff_fg/100)*(1+cfg.coeff_benef/100)*qte),ordre:ordre++});
+        }
+      }
+      setDone(true);reload();
+    }catch(e){setErr("Erreur import: "+e.message);}
+    setImporting(false);
+  }
+
+  var catColor={"MO":T.secondary,"Materiaux":T.primary,"Materiel":T.warning,"Transport":T.success,"Sous-traitance":"#A855F7","Divers":T.muted};
+
+  return <Modal title="📂 IA — Analyse Document → Projet Débours Sec" onClose={onClose} T={T}>
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* Import */}
+      {!postes.length&&<div style={{background:T.mid,borderRadius:12,padding:24,textAlign:"center",border:"2px dashed "+T.border}}>
+        <div style={{fontSize:36,marginBottom:8}}>📂</div>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:6}}>Importez votre document BTP</div>
+        <div style={{fontSize:12,color:T.muted,marginBottom:16}}>DPGF · Bordereau de prix · Devis · Excel · PDF · Image<br/>L'IA analyse TOUT le contenu et décompose chaque poste en détail</div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,.csv,.txt,image/*" style={{display:"none"}} onChange={function(e){var f=e.target.files[0];if(f){e.target.value="";analyseDoc(f);}}}/>
+        <button onClick={function(){fileRef.current.click();}} disabled={loading} style={{background:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"12px 28px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:15}}>{loading?"⏳ Analyse...":"Choisir un document"}</button>
+      </div>}
+
+      {/* Progression */}
+      {loading&&<div style={{display:"flex",flexDirection:"column",gap:8}}>
+        <div style={{background:T.secondary+"11",border:"1px solid "+T.secondary+"33",borderRadius:8,padding:"10px 14px",fontSize:13,color:T.secondary,fontWeight:600}}>{msg}</div>
+        <div style={{background:T.mid,borderRadius:99,height:8,overflow:"hidden"}}><div style={{width:prog+"%",background:T.secondary,height:"100%",borderRadius:99,transition:"width .3s"}}/></div>
+        <div style={{fontSize:11,color:T.muted,textAlign:"right"}}>{prog}%</div>
+      </div>}
+      {err&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 14px",color:T.danger,fontSize:12}}>⚠️ {err}</div>}
+
+      {/* Résultats */}
+      {postes.length>0&&!done&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",background:T.success+"11",border:"1px solid "+T.success+"33",borderRadius:10,padding:"12px 16px"}}>
+          <div style={{flex:1}}><div style={{fontWeight:700,color:T.success,fontSize:14}}>✅ {postes.length} postes analysés</div><div style={{fontSize:12,color:T.muted,marginTop:2}}>Vérifiez et ajustez les valeurs avant de générer le projet</div></div>
+          <button onClick={function(){fileRef.current.click();}} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:600}}>📂 Nouveau fichier</button>
+        </div>
+
+        {/* Nom session */}
+        <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:10,padding:"12px 16px"}}>
+          <FF label="Nom du projet débours à créer" value={sessNom} onChange={setSessNom} placeholder="Ex: DPGF Lot1 Gros Oeuvre" full T={T}/>
+        </div>
+
+        {/* Postes */}
+        {postes.map(function(po,pi){
+          var totPoste=0;
+          (po.elements||[]).forEach(function(el,ei){totPoste+=evalFormule(el.formule,el.vars,vals,pi,ei);});
+          var pvTotal=totPoste*(1+0.15)*(1+0.10);
+          return <div key={pi} style={{background:T.card,border:"1px solid "+T.border,borderRadius:12,overflow:"hidden"}}>
+            <div style={{background:T.primary+"22",borderBottom:"1px solid "+T.border,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:14,color:T.primary}}>{po.libelle}</div>
+                <div style={{fontSize:11,color:T.muted,marginTop:2}}>Quantité: <b>{po.quantite}</b> {po.unite} {po.prixDoc>0&&"| Prix doc: "+fmt(po.prixDoc)}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:10,color:T.muted}}>DS/unité | Total</div>
+                <div style={{fontWeight:800,fontSize:15,color:T.warning}}>{fmt(Math.round(totPoste))} <span style={{color:T.muted,fontSize:11}}>→</span> <span style={{color:T.success}}>{fmt(Math.round(pvTotal*(po.quantite||1)))}</span></div>
+              </div>
+            </div>
+            <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
+              {(po.elements||[]).map(function(el,ei){
+                var result=evalFormule(el.formule,el.vars,vals,pi,ei);
+                var cc=catColor[el.categorie]||T.muted;
+                return <div key={ei} style={{background:T.mid,borderRadius:10,padding:"10px 12px",border:"1px solid "+cc+"33"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,flexWrap:"wrap"}}>
+                        <span style={{background:cc+"22",color:cc,borderRadius:5,padding:"1px 7px",fontSize:10,fontWeight:700}}>{el.categorie}</span>
+                        <span style={{fontWeight:700,fontSize:13}}>{el.libelle}</span>
+                      </div>
+                      <div style={{fontSize:10,color:T.muted,background:T.bg,borderRadius:5,padding:"4px 8px",fontFamily:"monospace"}}>📐 {el.description||el.formule}</div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontWeight:800,fontSize:15,color:cc}}>{fmt(Math.round(result))}</div>
+                      <div style={{fontSize:9,color:T.muted}}>XOF/{po.unite}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:6}}>
+                    {(el.vars||[]).map(function(v){
+                      var key="p"+pi+"_e"+ei+"_"+v.nom;
+                      return <div key={v.nom} style={{background:T.card,borderRadius:6,padding:"7px 10px"}}>
+                        <div style={{fontSize:10,color:T.muted,marginBottom:3}}>{v.label}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:4}}>
+                          <input type="number" value={vals[key]!==undefined?vals[key]:v.valeur} onChange={function(e){setVal(key,parseFloat(e.target.value)||0);}} style={{flex:1,background:T.mid,border:"1px solid "+cc+"55",borderRadius:5,padding:"5px 7px",color:T.white,fontSize:12,fontWeight:700,outline:"none",width:"100%"}}/>
+                          <span style={{fontSize:9,color:T.muted,whiteSpace:"nowrap"}}>{v.unite}</span>
+                        </div>
+                      </div>;
+                    })}
+                  </div>
+                  <div style={{marginTop:6,fontSize:10,color:T.muted,fontFamily:"monospace",background:T.bg,borderRadius:4,padding:"3px 8px"}}>= {el.formule} = <b style={{color:cc}}>{result}</b> XOF/{po.unite}</div>
+                </div>;
+              })}
+              {po.elements.length===0&&<div style={{color:T.muted,fontSize:12,padding:8}}>Aucun élément décomposé pour ce poste</div>}
+            </div>
+            <div style={{background:T.success+"11",borderTop:"1px solid "+T.success+"33",padding:"8px 16px",display:"flex",justifyContent:"space-between"}}>
+              <span style={{fontSize:12,color:T.muted}}>DS/unité</span>
+              <span style={{fontWeight:800,fontSize:14,color:T.success}}>{fmt(Math.round(totPoste))}/{po.unite}</span>
+            </div>
+          </div>;
+        })}
+
+        {/* Total général */}
+        <div style={{background:T.primary+"11",border:"1px solid "+T.primary+"33",borderRadius:10,padding:"14px 18px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <span style={{fontWeight:800,fontSize:14,color:T.primary}}>TOTAL GÉNÉRAL</span>
+            <span style={{fontWeight:800,fontSize:18,color:T.success}}>{fmt(postes.reduce(function(acc,po,pi){var t=0;(po.elements||[]).forEach(function(el,ei){t+=evalFormule(el.formule,el.vars,vals,pi,ei);});return acc+t*(po.quantite||1);},0))}</span>
+          </div>
+          <button onClick={genererProjet} disabled={importing||!sessNom.trim()} style={{width:"100%",background:importing?T.mid:T.success,color:"#fff",border:"none",borderRadius:10,padding:"12px",fontWeight:800,fontSize:15,cursor:importing?"wait":"pointer"}}>{importing?"⏳ Génération en cours...":"🚀 Générer le projet Débours Sec"}</button>
+        </div>
+      </div>}
+
+      {done&&<div style={{background:T.success+"11",border:"1px solid "+T.success+"44",borderRadius:12,padding:24,textAlign:"center"}}>
+        <div style={{fontSize:40,marginBottom:8}}>🎉</div>
+        <div style={{fontWeight:800,fontSize:18,color:T.success,marginBottom:8}}>Projet généré avec succès !</div>
+        <div style={{color:T.muted,fontSize:13,marginBottom:16}}>"{sessNom}" créé avec {postes.length} postes et leurs sous-éléments</div>
+        <button onClick={onClose} style={{background:T.success,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:"pointer"}}>Voir le projet</button>
+      </div>}
+    </div>
+  </Modal>;
+}
+
+// ── IA OUVRAGE ────────────────────────────────────────────────────────────────
 function IAOuvrageModal(p){
   var onClose=p.onClose,sessions=p.sessions,reload=p.reload,T=p.T;
   var _q=useState(""),query=_q[0],setQuery=_q[1];
@@ -341,348 +602,50 @@ function IAOuvrageModal(p){
   var _sel=useState(""),selSess=_sel[0],setSelSess=_sel[1];
   var _imp=useState(false),importing=_imp[0],setImporting=_imp[1];
   var _done=useState(false),done=_done[0],setDone=_done[1];
-
+  function getSessCfg(sid){var s=sessions.find(function(s){return s.id===sid;});return s?{tc:s.taux_charges,fg:s.coeff_fg,benef:s.coeff_benef}:{tc:40,fg:15,benef:10};}
   async function analyze(){
     if(!query.trim())return;
     setLoading(true);setErr(null);setResult(null);setDone(false);
     try{
-      var prompt="Expert BTP Cote d'Ivoire. Decompose cet ouvrage: "+query+"\n\n"
-        +"Reponds UNIQUEMENT en lignes CSV pipe (pas d'intro, pas de commentaire):\n"
-        +"LIBELLE|UNITE|QTE|SALAIRE_J|RENDEMENT|MATERIAUX_U|MATERIEL_U|ST_U|CATEGORIE|TYPE_OUVRIER|NB\n"
-        +"Exemples:\n"
-        +"Fouille mecanique|m3|10|0|0|0|12000|0|Materiel|conducteur|1\n"
-        +"Beton proprete C10|m3|0.5|5000|1.5|85000|8000|0|Mixte|macon|2\n"
-        +"Ferraillage HA12|kg|120|7500|80|680|0|0|MO|ferrailleur|2\n"
-        +"Coffrage bois|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
-        +"Beton arme C25|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
-        +"Max 15 lignes. Commence directement.";
-      var data=await aiCall({model:AI_MODEL,max_tokens:8000,messages:[{role:"user",content:prompt}]});
+      var prompt="Expert BTP CI. Decompose: "+query+"\nCSV pipe:\nLIBELLE|UNITE|QTE|SALAIRE_J|RENDEMENT|MATERIAUX_U|MATERIEL_U|ST_U|CATEGORIE|TYPE_OUVRIER|NB\nExemples:\nFouille mecanique|m3|10|0|0|0|12000|0|Materiel|conducteur|1\nBeton C25|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\nMax 15 lignes. Commence directement.";
+      var data=await aiCall({model:AI_MODEL,max_tokens:4000,messages:[{role:"user",content:prompt}]});
       var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").trim();
-      var lines=txt.split("\n").map(function(l){return l.trim();}).filter(function(l){
-        return l.indexOf("|")>=2&&l.length>5&&!/^(libelle|designation|element|#)/i.test(l.split("|")[0]);
-      });
       var items=[];
-      lines.forEach(function(line){
-        try{
-          var parts=line.split("|");
-          if(parts.length<8)return;
-          var lib=parts[0].replace(/^[-*•\d.]+\s*/,"").trim();
-          if(!lib||lib.length<2)return;
-          items.push({
-            libelle:lib,
-            unite:String(parts[1]||"U").trim().slice(0,10),
-            quantite:parseNum(parts[2])||1,
-            salaire:parseNum(parts[3])||0,
-            rendement:parseNum(parts[4])||1,
-            materiau:parseNum(parts[5])||0,
-            materiel:parseNum(parts[6])||0,
-            sous_traitance:parseNum(parts[7])||0,
-            categorie:String(parts[8]||"Mixte").trim().slice(0,20),
-            typeOuvrier:String(parts[9]||"").trim().slice(0,20),
-            nbOuvriers:parseInt(parts[10])||1
-          });
-        }catch(e){}
+      txt.split("\n").map(function(l){return l.trim();}).filter(function(l){return l.indexOf("|")>=2&&l.length>5&&!/^(libelle|#)/i.test(l.split("|")[0]);}).forEach(function(line){
+        try{var parts=line.split("|");if(parts.length<8)return;var lib=parts[0].replace(/^[-*•\d.]+\s*/,"").trim();if(!lib||lib.length<2)return;items.push({libelle:lib,unite:String(parts[1]||"U").trim().slice(0,10),quantite:parseNum(parts[2])||1,salaire:parseNum(parts[3]),rendement:parseNum(parts[4])||1,materiau:parseNum(parts[5]),materiel:parseNum(parts[6]),sous_traitance:parseNum(parts[7]),categorie:String(parts[8]||"Mixte").trim(),typeOuvrier:String(parts[9]||"").trim(),nbOuvriers:parseInt(parts[10])||1});}catch(e){}
       });
-      if(!items.length)throw new Error("Aucun element extrait — reformulez l ouvrage");
-      var totMat=0,totMO=0,totMateriel=0,totST=0;
-      items.forEach(function(t){
-        var cfg2=getSessCfg(selSess,sessions);
-        var c=calcTache(t,cfg2.tc,cfg2);
-        totMO+=c.mo*t.quantite;
-        totMat+=(t.materiau||0)*t.quantite;
-        totMateriel+=(t.materiel||0)*t.quantite;
-        totST+=(t.sous_traitance||0)*t.quantite;
-      });
-      setResult({items:items,totMat:totMat,totMO:totMO,totMateriel:totMateriel,totST:totST});
+      if(!items.length)throw new Error("Aucun element extrait");
+      var cfg=getSessCfg(selSess);
+      var totMat=0,totMO=0,totMateriel=0;
+      items.forEach(function(t){var c=calcTache(t,cfg.tc,cfg);totMO+=c.mo*t.quantite;totMat+=(t.materiau||0)*t.quantite;totMateriel+=(t.materiel||0)*t.quantite;});
+      setResult({items:items,totMat:totMat,totMO:totMO,totMateriel:totMateriel});
     }catch(e){setErr(e.message);}
     setLoading(false);
   }
-
-  function getSessCfg(sid,sess){
-    var s=sess&&sess.find(function(s){return s.id===sid;});
-    return s?{tc:s.taux_charges,fg:s.coeff_fg,benef:s.coeff_benef}:{tc:40,fg:15,benef:10};
-  }
-
   async function importToSession(){
-    if(!selSess||!result)return;
-    setImporting(true);
-    var cfg=getSessCfg(selSess,sessions);
-    for(var i=0;i<result.items.length;i++){
-      var t=result.items[i];
-      var c=calcTache(t,cfg.tc,cfg);
-      await q("debourse_taches").insert({
-        session_id:selSess,libelle:t.libelle,unite:t.unite,quantite:t.quantite,
-        salaire:t.salaire,rendement:t.rendement,materiau:t.materiau,
-        materiel:t.materiel,sous_traitance:t.sous_traitance,
-        main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),
-        prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),
-        prix_vente_total:Math.round(c.pvt)
-      });
-    }
+    if(!selSess||!result)return;setImporting(true);
+    var cfg=getSessCfg(selSess);
+    for(var i=0;i<result.items.length;i++){var t=result.items[i];var c=calcTache(t,cfg.tc,cfg);await q("debourse_taches").insert({session_id:selSess,libelle:t.libelle,unite:t.unite,quantite:t.quantite,salaire:t.salaire,rendement:t.rendement,materiau:t.materiau,materiel:t.materiel,sous_traitance:t.sous_traitance,main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)});}
     setImporting(false);setDone(true);reload();
   }
-
-  var cfg2=getSessCfg(selSess,sessions);
+  var cfg2=getSessCfg(selSess);
   var items=result?result.items:[];
   var totDS=items.reduce(function(a,t){var c=calcTache(t,cfg2.tc,cfg2);return a+c.ds*t.quantite;},0);
   var totPV=items.reduce(function(a,t){var c=calcTache(t,cfg2.tc,cfg2);return a+c.pvt;},0);
-
-  return <Modal title="🤖 IA — Décomposition d'ouvrage BTP" onClose={onClose} T={T}>
+  return <Modal title="🤖 IA — Décomposition d'ouvrage" onClose={onClose} T={T}>
     <div style={{display:"flex",flexDirection:"column",gap:14}}>
       <FF label="Ouvrage à décomposer" value={query} onChange={setQuery} placeholder="Ex: Semelle filante 40x60cm béton armé C25/30..." rows={3} full T={T}/>
-      <button onClick={analyze} disabled={loading||!query.trim()} style={{background:loading?T.mid:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"12px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"🔍 Analyse en cours...":"🤖 Analyser l'ouvrage"}</button>
-      {err&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 14px",color:T.danger,fontSize:12}}>⚠️ {err}</div>}
-      {result&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
-          {[["🧱 Mat.",result.totMat,T.primary],["👷 MO",result.totMO,T.secondary],["⚙️ Matériel",result.totMateriel,T.warning],["🔨 DS Total",totDS,T.success]].map(function(r,i){return <div key={i} style={{background:r[2]+"11",border:"1px solid "+r[2]+"33",borderRadius:8,padding:"10px 12px",textAlign:"center"}}><div style={{fontSize:10,color:T.muted,marginBottom:4}}>{r[0]}</div><div style={{fontWeight:800,fontSize:13,color:r[2]}}>{fmtS(Math.round(r[1]))}</div></div>;})}
+      <button onClick={analyze} disabled={loading||!query.trim()} style={{background:loading?T.mid:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"12px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"🔍 Analyse...":"🤖 Analyser"}</button>
+      {err&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px",color:T.danger,fontSize:12}}>⚠️ {err}</div>}
+      {result&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+          {[["🧱 Mat.",result.totMat,T.primary],["👷 MO",result.totMO,T.secondary],["🔨 DS",totDS,T.success]].map(function(r,i){return <div key={i} style={{background:r[2]+"11",border:"1px solid "+r[2]+"33",borderRadius:8,padding:"10px",textAlign:"center"}}><div style={{fontSize:10,color:T.muted}}>{r[0]}</div><div style={{fontWeight:800,fontSize:14,color:r[2]}}>{fmtS(Math.round(r[1]))}</div></div>;})}
         </div>
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
-            <thead><tr style={{background:T.mid}}>{["Désignation","Unité","Qte","Salaire","Mat/u","DS/u","PV/u"].map(function(h){return <th key={h} style={{padding:"7px 8px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:10}}>{h}</th>;})}</tr></thead>
-            <tbody>
-              {items.map(function(t,i){var c=calcTache(t,cfg2.tc,cfg2);return <tr key={i} style={{background:i%2===0?T.mid+"88":"transparent",borderBottom:"1px solid "+T.border+"44"}}>
-                <td style={{padding:"6px 8px",fontWeight:600}}>{t.libelle}</td>
-                <td style={{padding:"6px 8px",color:T.muted,textAlign:"center"}}>{t.unite}</td>
-                <td style={{padding:"6px 8px",textAlign:"center"}}>{t.quantite}</td>
-                <td style={{padding:"6px 8px",textAlign:"right",color:T.secondary}}>{fmtS(t.salaire)}</td>
-                <td style={{padding:"6px 8px",textAlign:"right",color:T.primary}}>{fmtS(t.materiau)}</td>
-                <td style={{padding:"6px 8px",textAlign:"right",fontWeight:700}}>{fmtS(Math.round(c.ds))}</td>
-                <td style={{padding:"6px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(c.pv))}</td>
-              </tr>;})}
-              <tr style={{background:T.primary+"22",borderTop:"2px solid "+T.primary+"55"}}>
-                <td colSpan={5} style={{padding:"8px",fontWeight:800,color:T.primary}}>TOTAL</td>
-                <td style={{padding:"8px",textAlign:"right",fontWeight:800}}>{fmtS(Math.round(totDS))}</td>
-                <td style={{padding:"8px",textAlign:"right",fontWeight:800,color:T.success}}>{fmtS(Math.round(totPV))}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        {!done?<div style={{display:"flex",gap:10,alignItems:"flex-end",flexWrap:"wrap"}}>
-          <div style={{flex:1,minWidth:200}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Importer dans la session</label><select value={selSess} onChange={function(e){setSelSess(e.target.value);}} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 12px",color:T.white,fontSize:14,outline:"none"}}><option value="">-- Choisir --</option>{sessions.map(function(s){return <option key={s.id} value={s.id}>{s.nom}</option>;})}</select></div>
-          <button onClick={importToSession} disabled={!selSess||importing} style={{background:selSess?T.success:T.mid,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:selSess?"pointer":"not-allowed",fontSize:13}}>{importing?"Import...":"✅ Importer"}</button>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}><thead><tr style={{background:T.mid}}>{["Désignation","Qte","Un.","DS/u","PV/u"].map(function(h){return <th key={h} style={{padding:"6px 8px",textAlign:"left",color:T.muted,fontSize:10}}>{h}</th>;})}</tr></thead><tbody>{items.map(function(t,i){var c=calcTache(t,cfg2.tc,cfg2);return <tr key={i} style={{background:i%2===0?T.mid+"88":"transparent"}}><td style={{padding:"5px 8px",fontWeight:600}}>{t.libelle}</td><td style={{padding:"5px 8px",textAlign:"center"}}>{t.quantite}</td><td style={{padding:"5px 8px",color:T.muted}}>{t.unite}</td><td style={{padding:"5px 8px",textAlign:"right",fontWeight:700}}>{fmtS(Math.round(c.ds))}</td><td style={{padding:"5px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(c.pv))}</td></tr>;})}<tr style={{background:T.primary+"22"}}><td colSpan={3} style={{padding:"7px 8px",fontWeight:800,color:T.primary}}>TOTAL</td><td style={{padding:"7px 8px",textAlign:"right",fontWeight:800}}>{fmtS(Math.round(totDS))}</td><td style={{padding:"7px 8px",textAlign:"right",fontWeight:800,color:T.success}}>{fmtS(Math.round(totPV))}</td></tr></tbody></table></div>
+        {!done?<div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+          <div style={{flex:1,minWidth:180}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>Importer dans</label><select value={selSess} onChange={function(e){setSelSess(e.target.value);}} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 12px",color:T.white,fontSize:14,outline:"none"}}><option value="">-- Session --</option>{sessions.map(function(s){return <option key={s.id} value={s.id}>{s.nom}</option>;})}</select></div>
+          <button onClick={importToSession} disabled={!selSess||importing} style={{background:selSess?T.success:T.mid,color:"#fff",border:"none",borderRadius:10,padding:"10px 20px",fontWeight:700,cursor:selSess?"pointer":"not-allowed",fontSize:13}}>{importing?"...":"✅ Importer"}</button>
         </div>:<div style={{background:T.success+"22",border:"1px solid "+T.success+"44",borderRadius:10,padding:"12px",fontWeight:700,color:T.success,textAlign:"center"}}>✅ {items.length} éléments importés !</div>}
-      </div>}
-    </div>
-  </Modal>;
-}
-
-// ── ANALYSE DOCUMENT INTELLIGENTE ────────────────────────────────────────────
-function AnalyseDocModal(p){
-  var onClose=p.onClose,T=p.T;
-  var _l=useState(false),loading=_l[0],setLoading=_l[1];
-  var _e=useState(null),err=_e[0],setErr=_e[1];
-  var _msg=useState(""),msg=_msg[0],setMsg=_msg[1];
-  var _postes=useState([]),postes=_postes[0],setPostes=_postes[1];
-  var _vals=useState({}),vals=_vals[0],setVals=_vals[1];
-  var fileRef=useRef();
-
-  // Parser JSON robuste — répare les JSON tronqués
-  function safeParseJSON(txt){
-    // Essai direct
-    try{var jm=txt.match(/\{[\s\S]*\}/);if(jm)return JSON.parse(jm[0]);}catch(e){}
-    // Répare JSON tronqué en fermant les structures ouvertes
-    try{
-      var jm2=txt.match(/\{[\s\S]*/);
-      if(!jm2)return null;
-      var s=jm2[0];
-      // Compter les accolades et crochets ouverts
-      var opens=0,openb=0,inStr=false,esc=false;
-      for(var i=0;i<s.length;i++){
-        var c=s[i];
-        if(esc){esc=false;continue;}
-        if(c==="\\"&&inStr){esc=true;continue;}
-        if(c==='"'){inStr=!inStr;continue;}
-        if(inStr)continue;
-        if(c==='{')opens++;else if(c==='}')opens--;
-        else if(c==='[')openb++;else if(c===']')openb--;
-      }
-      // Fermer proprement
-      if(inStr)s+='"';
-      // Supprimer dernière virgule pendante
-      s=s.replace(/,\s*$/,"");
-      for(var j=0;j<openb;j++)s+="]";
-      for(var k=0;k<opens;k++)s+="}";
-      return JSON.parse(s);
-    }catch(e){return null;}
-  }
-  async function analyseDoc(file){
-    setLoading(true);setErr(null);setPostes([]);setVals({});
-    try{
-      setMsg("📄 Lecture du document...");
-      var isPDF=file.type==="application/pdf";
-      var isImg=file.type.indexOf("image/")===0;
-      var isExcel=file.name.match(/\.(xlsx|xls)$/i);
-      var texte="";
-      if(isPDF||isImg){
-        var b64=await new Promise(function(res,rej){var r=new FileReader();r.onload=function(e){res(e.target.result.split(",")[1]);};r.onerror=rej;r.readAsDataURL(file);});
-        var cb=isPDF?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
-        var d=await aiCall({model:AI_MODEL,max_tokens:4000,messages:[{role:"user",content:[cb,{type:"text",text:"Extrais le texte brut de ce document BTP. Retourne uniquement le contenu texte."}]}]});
-        texte=(d.content||[]).map(function(i){return i.text||"";}).join("");
-      } else if(isExcel){
-        var SheetJS=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
-        var buf=await file.arrayBuffer();
-        var wb=SheetJS.read(buf,{type:"array"});
-        var ws=wb.Sheets[wb.SheetNames[0]];
-        texte=SheetJS.utils.sheet_to_csv(ws);
-      } else {
-        texte=await file.text();
-      }
-      setMsg("🤖 Analyse et décomposition des postes...");
-      // Traitement par lot : d'abord identifier les postes, ensuite décomposer
-      var promptPostes="Expert BTP CI. Identifie les postes principaux de ce document BTP.\n"
-        +"Réponds UNIQUEMENT en JSON: {\"postes\":[{\"libelle\":\"Fouilles en rigole\",\"unite\":\"m3\"},{\"libelle\":\"Béton de propreté\",\"unite\":\"m3\"}]}\n"
-        +"Max 10 postes. JSON pur.\nDOCUMENT:\n"+texte.slice(0,3000);
-      var d2=await aiCall({model:AI_MODEL,max_tokens:1500,messages:[{role:"user",content:promptPostes}]});
-      var txt2=(d2.content||[]).map(function(i){return i.text||"";}).join("");
-      var parsed2=safeParseJSON(txt2);
-      if(!parsed2)throw new Error("Impossible d'identifier les postes");
-      var postesBase=parsed2.postes||[];
-      if(!postesBase.length)throw new Error("Aucun poste trouvé dans le document");
-
-      // Décomposer chaque poste un par un
-      var ps=[];
-      for(var pi=0;pi<Math.min(postesBase.length,8);pi++){
-        var pb=postesBase[pi];
-        setMsg("🔍 Décomposition "+( pi+1)+"/"+Math.min(postesBase.length,8)+" : "+pb.libelle+"...");
-        var promptEl="Expert BTP CI. Décompose ce poste BTP en éléments avec notes de calcul.\n"
-          +"Poste: "+pb.libelle+" (unité: "+(pb.unite||"U")+")\n"
-          +"Réponds UNIQUEMENT en JSON valide:\n"
-          +"{\"elements\":[{\"libelle\":\"Main d'oeuvre\",\"categorie\":\"MO\",\"formule\":\"nb_ouvriers*salaire_j/rendement_j\",\"description\":\"(nb ouvriers × salaire/j) ÷ rendement\",\"vars\":[{\"nom\":\"nb_ouvriers\",\"label\":\"Nb ouvriers\",\"valeur\":3,\"unite\":\"ouvriers\"},{\"nom\":\"salaire_j\",\"label\":\"Salaire/jour\",\"valeur\":5000,\"unite\":\"XOF/j\"},{\"nom\":\"rendement_j\",\"label\":\"Rendement/jour\",\"valeur\":4,\"unite\":\"m3/j\"}]}]}\n"
-          +"Règles: 2-4 éléments max, valeurs réalistes XOF CI, formules simples avec noms vars exacts, JSON pur.";
-        try{
-          var de=await aiCall({model:AI_MODEL,max_tokens:2500,messages:[{role:"user",content:promptEl}]});
-          var txte=(de.content||[]).map(function(i){return i.text||"";}).join("");
-          var parsedEl=safeParseJSON(txte);
-          var elements=parsedEl?parsedEl.elements||[]:[];
-          ps.push({libelle:pb.libelle,unite:pb.unite||"U",elements:elements});
-        }catch(e){
-          ps.push({libelle:pb.libelle,unite:pb.unite||"U",elements:[]});
-        }
-      }
-
-      // Init vals
-      var iv={};
-      ps.forEach(function(po,pi2){
-        (po.elements||[]).forEach(function(el,ei){
-          (el.vars||[]).forEach(function(v){
-            iv["p"+pi2+"_e"+ei+"_"+v.nom]=v.valeur;
-          });
-        });
-      });
-      setPostes(ps);setVals(iv);
-      setMsg("");
-    }catch(e){setErr(e.message);}
-    setLoading(false);
-  }
-
-  function evalFormule(formule,vars,valsMap,pi,ei){
-    try{
-      var scope={};
-      (vars||[]).forEach(function(v){
-        scope[v.nom]=parseFloat(valsMap["p"+pi+"_e"+ei+"_"+v.nom])||0;
-      });
-      // Évaluation sécurisée
-      var fn=new Function(...Object.keys(scope),"return ("+formule+")");
-      var res=fn(...Object.values(scope));
-      return isFinite(res)?Math.round(res*100)/100:0;
-    }catch(e){return 0;}
-  }
-
-  function setVal(key,v){setVals(function(pp){var n=Object.assign({},pp);n[key]=v;return n;});}
-
-  var catColor={"MO":T.secondary,"Materiaux":T.primary,"Materiel":T.warning,"Transport":T.success,"Sous-traitance":"#A855F7","Divers":T.muted};
-
-  return <Modal title="🤖 IA — Analyse & Décomposition de document" onClose={onClose} T={T}>
-    <div style={{display:"flex",flexDirection:"column",gap:14}}>
-      {/* Zone import */}
-      <div style={{background:T.mid,borderRadius:12,padding:20,textAlign:"center",border:"2px dashed "+T.border}}>
-        <div style={{fontSize:32,marginBottom:8}}>📂</div>
-        <div style={{fontSize:13,color:T.muted,marginBottom:12}}>Importez un DPGF, devis, bordereau de prix (PDF, Excel, image)</div>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,.csv,image/*" style={{display:"none"}} onChange={function(e){var f=e.target.files[0];if(f){e.target.value="";analyseDoc(f);}}}/>
-        <button onClick={function(){fileRef.current.click();}} disabled={loading} style={{background:T.secondary,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"Analyse en cours...":"Choisir un document"}</button>
-      </div>
-
-      {/* Progression */}
-      {msg&&<div style={{background:T.secondary+"11",border:"1px solid "+T.secondary+"33",borderRadius:8,padding:"10px 14px",fontSize:13,color:T.secondary,fontWeight:600}}>{msg}</div>}
-      {err&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 14px",color:T.danger,fontSize:12}}>⚠️ {err}</div>}
-
-      {/* Postes décomposés */}
-      {postes.map(function(po,pi){
-        var totalPoste=0;
-        (po.elements||[]).forEach(function(el,ei){totalPoste+=evalFormule(el.formule,el.vars,vals,pi,ei);});
-        return <div key={pi} style={{background:T.card,border:"1px solid "+T.border,borderRadius:12,overflow:"hidden"}}>
-          {/* Header poste */}
-          <div style={{background:T.primary+"22",borderBottom:"1px solid "+T.border,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
-              <div style={{fontWeight:800,fontSize:15,color:T.primary}}>{po.libelle}</div>
-              <div style={{fontSize:11,color:T.muted,marginTop:2}}>Unité : {po.unite||"U"}</div>
-            </div>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:11,color:T.muted}}>Total déboursé/unité</div>
-              <div style={{fontWeight:800,fontSize:18,color:T.success}}>{fmt(totalPoste)}</div>
-            </div>
-          </div>
-
-          {/* Éléments */}
-          <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:12}}>
-            {(po.elements||[]).map(function(el,ei){
-              var result=evalFormule(el.formule,el.vars,vals,pi,ei);
-              var cc=catColor[el.categorie]||T.muted;
-              return <div key={ei} style={{background:T.mid,borderRadius:10,padding:"12px 14px",border:"1px solid "+cc+"44"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
-                  <div>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                      <span style={{background:cc+"22",color:cc,borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:700}}>{el.categorie}</span>
-                      <span style={{fontWeight:700,fontSize:13}}>{el.libelle}</span>
-                    </div>
-                    {/* Note de calcul */}
-                    <div style={{fontSize:11,color:T.muted,background:T.bg,borderRadius:6,padding:"5px 10px",fontFamily:"monospace"}}>
-                      📐 {el.description||el.formule}
-                    </div>
-                  </div>
-                  <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
-                    <div style={{fontSize:10,color:T.muted}}>Résultat</div>
-                    <div style={{fontWeight:800,fontSize:16,color:cc}}>{fmt(result)}</div>
-                    <div style={{fontSize:10,color:T.muted}}>XOF/{po.unite||"U"}</div>
-                  </div>
-                </div>
-                {/* Variables saisissables */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8,marginTop:8}}>
-                  {(el.vars||[]).map(function(v){
-                    var key="p"+pi+"_e"+ei+"_"+v.nom;
-                    return <div key={v.nom} style={{background:T.card,borderRadius:7,padding:"8px 10px"}}>
-                      <div style={{fontSize:10,color:T.muted,marginBottom:3}}>{v.label}</div>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <input
-                          type="number"
-                          value={vals[key]!==undefined?vals[key]:v.valeur}
-                          onChange={function(e){setVal(key,parseFloat(e.target.value)||0);}}
-                          style={{flex:1,background:T.mid,border:"1px solid "+cc+"55",borderRadius:6,padding:"6px 8px",color:T.white,fontSize:13,fontWeight:700,outline:"none",width:"100%"}}
-                        />
-                        <span style={{fontSize:10,color:T.muted,whiteSpace:"nowrap"}}>{v.unite}</span>
-                      </div>
-                    </div>;
-                  })}
-                </div>
-                {/* Formule visible */}
-                <div style={{marginTop:8,fontSize:10,color:T.muted,fontFamily:"monospace",background:T.bg,borderRadius:5,padding:"4px 8px"}}>
-                  = {el.formule} = <strong style={{color:cc}}>{result} XOF/{po.unite||"U"}</strong>
-                </div>
-              </div>;
-            })}
-          </div>
-
-          {/* Récap poste */}
-          <div style={{background:T.success+"11",borderTop:"1px solid "+T.success+"33",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontSize:12,color:T.muted,fontWeight:600}}>TOTAL DÉBOURSÉ SEC / {po.unite||"U"}</span>
-            <span style={{fontWeight:800,fontSize:16,color:T.success}}>{fmt(totalPoste)}</span>
-          </div>
-        </div>;
-      })}
-
-      {postes.length>0&&<div style={{background:T.primary+"11",border:"1px solid "+T.primary+"33",borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontWeight:800,fontSize:14,color:T.primary}}>TOTAL GÉNÉRAL</span>
-        <span style={{fontWeight:800,fontSize:20,color:T.primary}}>{fmt(postes.reduce(function(acc,po,pi){var t=0;(po.elements||[]).forEach(function(el,ei){t+=evalFormule(el.formule,el.vars,vals,pi,ei);});return acc+t;},0))}</span>
       </div>}
     </div>
   </Modal>;
@@ -702,161 +665,108 @@ function SessionDetail(p){
   var cfg={tc:sess.taux_charges||40,fg:sess.coeff_fg||15,benef:sess.coeff_benef||10};
   var chNom=(ch.find(function(c){return c.id===sess.chantier_id;})||{}).nom||"";
   var totaux=taches.reduce(function(acc,t){var c=calcTache(t,cfg.tc,cfg);return{ds:acc.ds+c.ds*(t.quantite||0),pr:acc.pr+c.pr*(t.quantite||0),pvt:acc.pvt+c.pvt};},{ds:0,pr:0,pvt:0});
-
   function startEdit(t){setEditingId(t.id);setEditRow({libelle:t.libelle,unite:t.unite,quantite:t.quantite,salaire:t.salaire,rendement:t.rendement,materiau:t.materiau,materiel:t.materiel,sous_traitance:t.sous_traitance});}
   function cancelEdit(){setEditingId(null);setEditRow({});}
   function saveEdit(id){var c=calcTache(editRow,cfg.tc,cfg);q("debourse_taches").eq("id",id).update({libelle:editRow.libelle,unite:editRow.unite,quantite:parseFloat(editRow.quantite)||0,salaire:parseFloat(editRow.salaire)||0,rendement:parseFloat(editRow.rendement)||1,materiau:parseFloat(editRow.materiau)||0,materiel:parseFloat(editRow.materiel)||0,sous_traitance:parseFloat(editRow.sous_traitance)||0,main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)}).then(function(){setEditingId(null);setEditRow({});reload();});}
-  function upE(k,v){setEditRow(function(pp){return Object.assign({},pp,{[k]:v});});}
+  function upE(k,v){setEditRow(function(pp){var n=Object.assign({},pp);n[k]=v;return n;});}
   function delTache(id){q("debourse_taches").eq("id",id).del().then(function(){reload();});}
   function saveTache(){if(!tForm.libelle)return;setSaving(true);var c=calcTache(tForm,cfg.tc,cfg);q("debourse_taches").insert({session_id:sess.id,libelle:tForm.libelle,unite:tForm.unite,quantite:parseFloat(tForm.quantite)||0,salaire:parseFloat(tForm.salaire)||0,rendement:parseFloat(tForm.rendement)||1,materiau:parseFloat(tForm.materiau)||0,materiel:parseFloat(tForm.materiel)||0,sous_traitance:parseFloat(tForm.sous_traitance)||0,main_oeuvre_u:Math.round(c.mo),debourse_sec_u:Math.round(c.ds),prix_revient_u:Math.round(c.pr),prix_vente_u:Math.round(c.pv),prix_vente_total:Math.round(c.pvt)}).then(function(){setSaving(false);setShowNew(false);setTForm({libelle:"",unite:"U",quantite:0,salaire:0,rendement:1,materiau:0,materiel:0,sous_traitance:0});reload();});}
-
-  async function callAI(messages,maxTok){
-    return await aiText(messages,maxTok);
-  }
-
   async function handleFile(file){
     setImporting(true);setImportLog(null);
     var ext=file.name.split(".").pop().toLowerCase();
-    var isExcel=ext==="xlsx"||ext==="xls";
-    var isPDF=file.type==="application/pdf";
-    var isImg=file.type.indexOf("image/")===0;
     try{
       var allTaches=[];
-      if(isExcel){
+      if(ext==="xlsx"||ext==="xls"){
         var SheetJS=await import("https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs");
-        var buf=await file.arrayBuffer();
-        var wb=SheetJS.read(buf,{type:"array"});
-        var ws=wb.Sheets[wb.SheetNames[0]];
-        var raw=SheetJS.utils.sheet_to_json(ws,{header:1,defval:""});
+        var buf=await file.arrayBuffer();var wb=SheetJS.read(buf,{type:"array"});var ws=wb.Sheets[wb.SheetNames[0]];var raw=SheetJS.utils.sheet_to_json(ws,{header:1,defval:""});
         raw=raw.filter(function(r){return r.some(function(c){return String(c).trim()!=="";});});
-        if(!raw.length)throw new Error("Feuille vide");
-        setImportLog({ok:true,msg:"🤖 Analyse structure..."});
-        var sample=raw.slice(0,15);
-        var t1=await callAI([{role:"user",content:"Expert BTP. Analyse ce fichier Excel. Reponds en CSV pipe UNE SEULE LIGNE:\nTYPE|DEVISE|COL_LIBELLE|COL_QTE|COL_UNITE|COL_PU|COL_TOTAL|LIGNE_DEBUT|TOTAL_GENERAL\nLignes:"+JSON.stringify(sample)+"\nSi colonne inconnue mettre -1. Une seule ligne sans commentaire."}],150);
-        var l1=t1.trim().split("\n").filter(function(l){return l.indexOf("|")>=0;});
-        var mapping={colLibelle:0,colQuantite:-1,colUnite:-1,colPrixUnitaire:-1,ligneDebut:1};
-        if(l1.length>0){var pp=l1[l1.length-1].split("|");mapping.colLibelle=parseInt(pp[2])||0;mapping.colQuantite=parseInt(pp[3]);mapping.colUnite=parseInt(pp[4]);mapping.colPrixUnitaire=parseInt(pp[5]);mapping.ligneDebut=parseInt(pp[7])||1;}
-        var dataRows=raw.slice(mapping.ligneDebut||1);
-        var chunkSize=10;
-        for(var ci=0;ci<dataRows.length;ci+=chunkSize){
-          var chunk=dataRows.slice(ci,ci+chunkSize);
-          var t2=await callAI([{role:"user",content:"Expert BTP. Extrait taches de ces lignes Excel. Reponds en CSV pipe:\nLIBELLE|QUANTITE|UNITE|PRIX_UNITAIRE|MONTANT_TOTAL|MO|MATERIAUX|MATERIEL|SOUS_TRAITANCE\nIgnore totaux/titres. Retourne lignes seulement.\nLignes:"+JSON.stringify(chunk)}],1500);
-          t2.trim().split("\n").forEach(function(line){
-            line=line.trim();if(!line||line.indexOf("|")<0)return;
-            var parts=line.split("|");if(parts.length<2)return;
-            var lib=parts[0].replace(/^[-*•]\s*/,"").trim();
-            if(!lib||lib.length<2||/^(libelle|total|sous.total)/i.test(lib))return;
-            allTaches.push({libelle:lib,quantite:parseNum(parts[1])||1,unite:String(parts[2]||"U").trim(),prixUnitaire:parseNum(parts[3]),montantTotal:parseNum(parts[4]),mo:parseNum(parts[5]),materiaux:parseNum(parts[6]),materiel:parseNum(parts[7]),sousTraitance:parseNum(parts[8])});
-          });
-          setImportLog({ok:true,msg:"📊 "+Math.min(ci+chunkSize,dataRows.length)+"/"+dataRows.length+" lignes — "+allTaches.length+" taches"});
+        setImportLog({ok:true,msg:"🤖 Analyse..."});
+        for(var ci=0;ci<raw.length;ci+=10){
+          var chunk=raw.slice(ci,ci+10);
+          var t2=await aiText([{role:"user",content:"Expert BTP. Extrait taches. CSV pipe:\nLIBELLE|QTE|UNITE|PU|MT|MO|MAT|MATER|ST\nIgnore totaux. Lignes seulement.\n"+JSON.stringify(chunk)}],1500);
+          t2.trim().split("\n").forEach(function(line){line=line.trim();if(!line||line.indexOf("|")<0)return;var parts=line.split("|");if(parts.length<2)return;var lib=parts[0].replace(/^[-*•]\s*/,"").trim();if(!lib||lib.length<2||/^(libelle|total)/i.test(lib))return;allTaches.push({libelle:lib,quantite:parseNum(parts[1])||1,unite:String(parts[2]||"U").trim(),prixUnitaire:parseNum(parts[3]),mo:parseNum(parts[5]),materiaux:parseNum(parts[6]),materiel:parseNum(parts[7]),sousTraitance:parseNum(parts[8])});});
+          setImportLog({ok:true,msg:"📊 "+Math.min(ci+10,raw.length)+"/"+raw.length+" lignes — "+allTaches.length+" taches"});
         }
-      } else if(isPDF||isImg){
-        setImportLog({ok:true,msg:"🔍 Lecture IA..."});
+      } else if(file.type==="application/pdf"||file.type.indexOf("image/")===0){
+        setImportLog({ok:true,msg:"🔍 Lecture..."});
         var b64=await new Promise(function(res,rej){var rr=new FileReader();rr.onload=function(e){res(e.target.result.split(",")[1]);};rr.onerror=rej;rr.readAsDataURL(file);});
-        var cb=isPDF?{type:"document",source:{type:"base64",media_type:file.type,data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
-        var pp2="Expert BTP. Extrais TOUTES les taches. CSV pipe:\nLIBELLE|QUANTITE|UNITE|PRIX_UNITAIRE|MONTANT_TOTAL|MO|MATERIAUX|MATERIEL|SOUS_TRAITANCE\nIgnore totaux. Commence directement.";
-        var dd=await aiCall({model:AI_MODEL,max_tokens:3000,messages:[{role:"user",content:[cb,{type:"text",text:pp2}]}]});
+        var cb=file.type==="application/pdf"?{type:"document",source:{type:"base64",media_type:file.type,data:b64}}:{type:"image",source:{type:"base64",media_type:file.type,data:b64}};
+        var dd=await aiCall({model:AI_MODEL,max_tokens:3000,messages:[{role:"user",content:[cb,{type:"text",text:"Expert BTP. Extrais taches. CSV pipe:\nLIBELLE|QTE|UNITE|PU|MT|MO|MAT|MATER|ST\nIgnore totaux."}]}]});
         var tt=(dd.content||[]).map(function(i){return i.text||"";}).join("");
-        tt.trim().split("\n").forEach(function(line){
-          line=line.trim();if(!line||line.indexOf("|")<0)return;
-          var parts=line.split("|");if(parts.length<2)return;
-          var lib=parts[0].replace(/^[-*•]\s*/,"").trim();
-          if(!lib||lib.length<2||/^(libelle|total)/i.test(lib))return;
-          allTaches.push({libelle:lib,quantite:parseNum(parts[1])||1,unite:String(parts[2]||"U").trim(),prixUnitaire:parseNum(parts[3]),montantTotal:parseNum(parts[4]),mo:parseNum(parts[5]),materiaux:parseNum(parts[6]),materiel:parseNum(parts[7]),sousTraitance:parseNum(parts[8])});
-        });
-      } else throw new Error("Format non supporte");
-
-      if(!allTaches.length)throw new Error("Aucune tache detectee");
-      setImportLog({ok:true,msg:"💾 Import de "+allTaches.length+" taches..."});
-      var imported=0;
-      for(var i=0;i<allTaches.length;i++){
-        var t=allTaches[i];var lib=String(t.libelle||"").trim();if(!lib)continue;
-        var qte=parseFloat(t.quantite)||1;
-        var mo2=parseFloat(t.mo)||0,mat=parseFloat(t.materiaux)||0,mat2=parseFloat(t.materiel)||0,st=parseFloat(t.sousTraitance)||0;
-        var pu=parseFloat(t.prixUnitaire)||0;
-        if(mo2===0&&mat===0&&mat2===0&&st===0&&pu>0)st=pu;
-        var cc=calcTache({quantite:qte,salaire:mo2,rendement:1,materiau:mat,materiel:mat2,sous_traitance:st},cfg.tc,cfg);
-        await q("debourse_taches").insert({session_id:sess.id,libelle:lib,unite:t.unite||"U",quantite:qte,salaire:mo2,rendement:1,materiau:mat,materiel:mat2,sous_traitance:st,main_oeuvre_u:Math.round(cc.mo),debourse_sec_u:Math.round(cc.ds),prix_revient_u:Math.round(cc.pr),prix_vente_u:Math.round(cc.pv),prix_vente_total:Math.round(cc.pvt)});
-        imported++;
-      }
-      setImportLog({ok:true,msg:"✅ "+imported+" taches importees !"});
-      reload();
+        tt.trim().split("\n").forEach(function(line){line=line.trim();if(!line||line.indexOf("|")<0)return;var parts=line.split("|");var lib=parts[0].replace(/^[-*•]\s*/,"").trim();if(!lib||lib.length<2||/^(libelle|total)/i.test(lib))return;allTaches.push({libelle:lib,quantite:parseNum(parts[1])||1,unite:String(parts[2]||"U").trim(),prixUnitaire:parseNum(parts[3]),mo:parseNum(parts[5]),materiaux:parseNum(parts[6]),materiel:parseNum(parts[7]),sousTraitance:parseNum(parts[8])});});
+      } else throw new Error("Format non supporté");
+      if(!allTaches.length)throw new Error("Aucune tâche détectée");
+      setImportLog({ok:true,msg:"💾 Import "+allTaches.length+" taches..."});
+      for(var i=0;i<allTaches.length;i++){var t=allTaches[i];var lib=String(t.libelle||"").trim();if(!lib)continue;var qte=parseFloat(t.quantite)||1;var mo=parseFloat(t.mo)||0,mat=parseFloat(t.materiaux)||0,mat2=parseFloat(t.materiel)||0,st=parseFloat(t.sousTraitance)||0;var pu=parseFloat(t.prixUnitaire)||0;if(mo===0&&mat===0&&mat2===0&&st===0&&pu>0)st=pu;var cc=calcTache({quantite:qte,salaire:mo,rendement:1,materiau:mat,materiel:mat2,sous_traitance:st},cfg.tc,cfg);await q("debourse_taches").insert({session_id:sess.id,libelle:lib,unite:t.unite||"U",quantite:qte,salaire:mo,rendement:1,materiau:mat,materiel:mat2,sous_traitance:st,main_oeuvre_u:Math.round(cc.mo),debourse_sec_u:Math.round(cc.ds),prix_revient_u:Math.round(cc.pr),prix_vente_u:Math.round(cc.pv),prix_vente_total:Math.round(cc.pvt)});}
+      setImportLog({ok:true,msg:"✅ "+allTaches.length+" taches importees !"});reload();
     }catch(e){setImportLog({ok:false,msg:"Erreur: "+e.message});}
     setImporting(false);
   }
-
   function onFileChange(e){var file=e.target.files[0];if(!file)return;e.target.value="";handleFile(file);}
   var iS={background:T.bg,border:"1px solid "+T.border,borderRadius:5,padding:"4px 7px",color:T.white,fontSize:11,outline:"none",width:"100%"};
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(3,1fr)",gap:10}}>
-      <Kpi icon="🔨" label="Debours sec" value={fmtS(Math.round(totaux.ds))} color={T.warning} compact={isMobile} T={T}/>
-      <Kpi icon="🏷️" label="Prix de revient" value={fmtS(Math.round(totaux.pr))} color={T.secondary} compact={isMobile} T={T}/>
-      <Kpi icon="💰" label="Prix de vente HT" value={fmtS(Math.round(totaux.pvt))} color={T.success} compact={isMobile} T={T}/>
+      <Kpi icon="🔨" label="Debours sec" value={fmtS(Math.round(totaux.ds))} color={T.warning} compact T={T}/>
+      <Kpi icon="🏷️" label="Prix revient" value={fmtS(Math.round(totaux.pr))} color={T.secondary} compact T={T}/>
+      <Kpi icon="💰" label="Prix vente HT" value={fmtS(Math.round(totaux.pvt))} color={T.success} compact T={T}/>
     </div>
     <Card title={"Coefficients — "+sess.nom} T={T}>
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(3,1fr)",gap:12}}>
-        {[["Charges sociales (%)","taux_charges",cfg.tc],["Frais generaux (%)","coeff_fg",cfg.fg],["Benefice (%)","coeff_benef",cfg.benef]].map(function(row){return <div key={row[1]}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>{row[0]}</label><input type="number" defaultValue={row[2]} onBlur={function(e){updateCfg(row[1],e.target.value);}} style={{background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"6px 8px",color:T.white,fontSize:12,outline:"none",width:"100%"}}/></div>;})}
+        {[["Charges (%)","taux_charges",cfg.tc],["FG (%)","coeff_fg",cfg.fg],["Benefice (%)","coeff_benef",cfg.benef]].map(function(row){return <div key={row[1]}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>{row[0]}</label><input type="number" defaultValue={row[2]} onBlur={function(e){updateCfg(row[1],e.target.value);}} style={{background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"6px 8px",color:T.white,fontSize:12,outline:"none",width:"100%"}}/></div>;})}
       </div>
     </Card>
-    <Card title={"Taches ("+taches.length+")"} action={
-      <div style={{display:"flex",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,image/*" style={{display:"none"}} onChange={onFileChange}/>
-        <button onClick={function(){fileRef.current.click();}} disabled={importing} style={{background:importing?T.mid:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:importing?"wait":"pointer",fontSize:12}}>{importing?"⏳ Import...":"📂 Importer"}</button>
-        <button onClick={function(){exportDebourseHTML(sess,taches,cfg,chNom,T);}} style={{background:T.primary+"22",color:T.primary,border:"1px solid "+T.primary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>PDF</button>
-        <button onClick={function(){setShowNew(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Tache</button>
-      </div>} T={T}>
-      {importLog&&<div style={{background:importLog.ok?T.success+"11":T.danger+"11",border:"1px solid "+(importLog.ok?T.success:T.danger)+"44",borderRadius:8,padding:"8px 14px",marginBottom:10,fontSize:12,fontWeight:600,color:importLog.ok?T.success:T.danger}}>{importLog.msg}<button onClick={function(){setImportLog(null);}} style={{float:"right",background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:14}}>✕</button></div>}
+    <Card title={"Taches ("+taches.length+")"} action={<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.pdf,image/*" style={{display:"none"}} onChange={onFileChange}/>
+      <button onClick={function(){fileRef.current.click();}} disabled={importing} style={{background:importing?T.mid:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:importing?"wait":"pointer",fontSize:12}}>{importing?"⏳":"📂 Importer"}</button>
+      <button onClick={function(){exportDebourseHTML(sess,taches,cfg,chNom,T);}} style={{background:T.primary+"22",color:T.primary,border:"1px solid "+T.primary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>PDF</button>
+      <button onClick={function(){setShowNew(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Tache</button>
+    </div>} T={T}>
+      {importLog&&<div style={{background:importLog.ok?T.success+"11":T.danger+"11",border:"1px solid "+(importLog.ok?T.success:T.danger)+"44",borderRadius:8,padding:"8px 14px",marginBottom:10,fontSize:12,fontWeight:600,color:importLog.ok?T.success:T.danger}}>{importLog.msg}<button onClick={function(){setImportLog(null);}} style={{float:"right",background:"none",border:"none",color:T.muted,cursor:"pointer"}}>✕</button></div>}
       {taches.length===0&&<Empty msg="Aucune tache" icon="📋"/>}
-      {taches.length>0&&<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:isMobile?600:900}}>
-        <thead><tr style={{background:T.mid}}>{["#","Designation","Qte","Unite","Salaire","Rendement","Materiaux","Materiel","S-trait.","MO/u","DS/u","PR/u","PV/u","PV total",""].map(function(h,i){return <th key={i} style={{padding:"7px 8px",textAlign:i>8?"right":"left",color:T.muted,fontWeight:600,whiteSpace:"nowrap",fontSize:10,borderBottom:"2px solid "+T.border}}>{h}</th>;})}</tr></thead>
+      {taches.length>0&&<div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:600}}>
+        <thead><tr style={{background:T.mid}}>{["#","Designation","Qte","Un.","Salaire","Rdt","Mat.","Mater.","ST","MO/u","DS/u","PV total",""].map(function(h,i){return <th key={i} style={{padding:"6px 8px",textAlign:i>8?"right":"left",color:T.muted,fontWeight:600,fontSize:10,borderBottom:"2px solid "+T.border}}>{h}</th>;})}</tr></thead>
         <tbody>
-          {taches.map(function(t,idx){var c=calcTache(t,cfg.tc,cfg);var isEditing=editingId===t.id;var previewC=isEditing?calcTache(editRow,cfg.tc,cfg):null;return <tr key={t.id} style={{background:isEditing?T.primary+"11":idx%2===0?T.mid+"88":"transparent",borderBottom:"1px solid "+T.border+"66"}}>
-            <td style={{padding:"6px 8px",color:T.muted,fontSize:10}}>{idx+1}</td>
-            {isEditing?<>
-              <td style={{padding:"4px 6px"}}><input value={editRow.libelle||""} onChange={function(e){upE("libelle",e.target.value);}} style={Object.assign({},iS,{minWidth:140})}/></td>
-              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.quantite||0} onChange={function(e){upE("quantite",e.target.value);}} style={Object.assign({},iS,{width:60,textAlign:"center"})}/></td>
-              <td style={{padding:"4px 6px"}}><select value={editRow.unite||"U"} onChange={function(e){upE("unite",e.target.value);}} style={Object.assign({},iS,{width:65})}>{UNITES.map(function(u){return <option key={u} value={u}>{u}</option>;})}</select></td>
-              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.salaire||0} onChange={function(e){upE("salaire",e.target.value);}} style={Object.assign({},iS,{width:80,textAlign:"right"})}/></td>
-              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.rendement||1} onChange={function(e){upE("rendement",e.target.value);}} style={Object.assign({},iS,{width:65,textAlign:"right"})}/></td>
-              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.materiau||0} onChange={function(e){upE("materiau",e.target.value);}} style={Object.assign({},iS,{width:80,textAlign:"right"})}/></td>
-              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.materiel||0} onChange={function(e){upE("materiel",e.target.value);}} style={Object.assign({},iS,{width:80,textAlign:"right"})}/></td>
-              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.sous_traitance||0} onChange={function(e){upE("sous_traitance",e.target.value);}} style={Object.assign({},iS,{width:80,textAlign:"right"})}/></td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.secondary,fontWeight:600}}>{fmtS(Math.round(previewC.mo))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.warning,fontWeight:600}}>{fmtS(Math.round(previewC.ds))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{fmtS(Math.round(previewC.pr))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right"}}>{fmtS(Math.round(previewC.pv))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(previewC.pvt))}</td>
-              <td style={{padding:"4px 6px",whiteSpace:"nowrap"}}><button onClick={function(){saveEdit(t.id);}} style={{background:T.success,color:"#fff",border:"none",borderRadius:5,padding:"4px 8px",fontSize:10,cursor:"pointer",fontWeight:700,marginRight:4}}>OK</button><button onClick={cancelEdit} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:5,padding:"4px 8px",fontSize:10,cursor:"pointer"}}>✕</button></td>
+          {taches.map(function(t,idx){var c=calcTache(t,cfg.tc,cfg);var isEdit=editingId===t.id;var pC=isEdit?calcTache(editRow,cfg.tc,cfg):null;var isDetail=String(t.libelle||"").startsWith("  └");return <tr key={t.id} style={{background:isEdit?T.primary+"11":isDetail?T.bg:idx%2===0?T.mid+"88":"transparent",borderBottom:"1px solid "+T.border+"44"}}>
+            <td style={{padding:"5px 8px",color:T.muted,fontSize:10}}>{isDetail?"":idx+1}</td>
+            {isEdit?<>
+              <td style={{padding:"4px 6px"}}><input value={editRow.libelle||""} onChange={function(e){upE("libelle",e.target.value);}} style={Object.assign({},iS,{minWidth:120})}/></td>
+              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.quantite||0} onChange={function(e){upE("quantite",e.target.value);}} style={Object.assign({},iS,{width:55,textAlign:"center"})}/></td>
+              <td style={{padding:"4px 6px"}}><select value={editRow.unite||"U"} onChange={function(e){upE("unite",e.target.value);}} style={Object.assign({},iS,{width:60})}>{UNITES.map(function(u){return <option key={u} value={u}>{u}</option>;})}</select></td>
+              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.salaire||0} onChange={function(e){upE("salaire",e.target.value);}} style={Object.assign({},iS,{width:70,textAlign:"right"})}/></td>
+              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.rendement||1} onChange={function(e){upE("rendement",e.target.value);}} style={Object.assign({},iS,{width:55,textAlign:"right"})}/></td>
+              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.materiau||0} onChange={function(e){upE("materiau",e.target.value);}} style={Object.assign({},iS,{width:70,textAlign:"right"})}/></td>
+              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.materiel||0} onChange={function(e){upE("materiel",e.target.value);}} style={Object.assign({},iS,{width:70,textAlign:"right"})}/></td>
+              <td style={{padding:"4px 6px"}}><input type="number" value={editRow.sous_traitance||0} onChange={function(e){upE("sous_traitance",e.target.value);}} style={Object.assign({},iS,{width:70,textAlign:"right"})}/></td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.secondary}}>{fmtS(Math.round(pC.mo))}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.warning}}>{fmtS(Math.round(pC.ds))}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(pC.pvt))}</td>
+              <td style={{padding:"4px 6px",whiteSpace:"nowrap"}}><button onClick={function(){saveEdit(t.id);}} style={{background:T.success,color:"#fff",border:"none",borderRadius:4,padding:"3px 7px",fontSize:10,cursor:"pointer",marginRight:3}}>OK</button><button onClick={cancelEdit} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:4,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button></td>
             </>:<>
-              <td style={{padding:"6px 8px",fontWeight:600}}>{t.libelle}</td>
-              <td style={{padding:"6px 8px",textAlign:"center"}}>{t.quantite}</td>
-              <td style={{padding:"6px 8px",textAlign:"center",color:T.muted}}>{t.unite}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.salaire)}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{t.rendement}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.materiau)}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.materiel)}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.sous_traitance)}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.secondary,fontWeight:600}}>{fmtS(Math.round(c.mo))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.warning,fontWeight:600}}>{fmtS(Math.round(c.ds))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.muted}}>{fmtS(Math.round(c.pr))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right"}}>{fmtS(Math.round(c.pv))}</td>
-              <td style={{padding:"6px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{fmtS(Math.round(c.pvt))}</td>
-              <td style={{padding:"4px 6px",whiteSpace:"nowrap"}}><button onClick={function(){startEdit(t);}} style={{background:T.warning+"22",color:T.warning,border:"1px solid "+T.warning+"44",borderRadius:5,padding:"4px 8px",fontSize:10,cursor:"pointer",marginRight:4}}>✏️</button><button onClick={function(){delTache(t.id);}} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:5,padding:"4px 8px",fontSize:10,cursor:"pointer"}}>🗑</button></td>
+              <td style={{padding:"5px 8px",fontWeight:isDetail?400:600,color:isDetail?T.muted:T.white,fontSize:isDetail?10:11}}>{t.libelle}</td>
+              <td style={{padding:"5px 8px",textAlign:"center",color:isDetail?T.muted:T.white}}>{t.quantite}</td>
+              <td style={{padding:"5px 8px",color:T.muted}}>{t.unite}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.salaire)}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.muted}}>{t.rendement}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.materiau)}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.materiel)}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.muted}}>{fmtS(t.sous_traitance)}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.secondary}}>{fmtS(Math.round(c.mo))}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.warning,fontWeight:600}}>{fmtS(Math.round(c.ds))}</td>
+              <td style={{padding:"5px 8px",textAlign:"right",color:T.success,fontWeight:700}}>{isDetail?fmtS(Math.round(c.ds*t.quantite)):fmtS(Math.round(c.pvt))}</td>
+              <td style={{padding:"4px 6px",whiteSpace:"nowrap"}}>{!isDetail&&<><button onClick={function(){startEdit(t);}} style={{background:T.warning+"22",color:T.warning,border:"1px solid "+T.warning+"44",borderRadius:4,padding:"3px 7px",fontSize:10,cursor:"pointer",marginRight:3}}>✏️</button><button onClick={function(){delTache(t.id);}} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:4,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>🗑</button></>}</td>
             </>}
           </tr>;})}
           <tr style={{background:T.primary+"22",borderTop:"2px solid "+T.primary+"55",fontWeight:800}}>
-            <td colSpan={9} style={{padding:"8px 10px",color:T.primary,fontSize:11}}>TOTAL</td>
-            <td style={{padding:"8px",textAlign:"right",color:T.secondary,fontSize:11}}></td>
-            <td style={{padding:"8px",textAlign:"right",color:T.warning,fontSize:11}}>{fmtS(Math.round(totaux.ds))}</td>
-            <td style={{padding:"8px",textAlign:"right",color:T.muted,fontSize:11}}>{fmtS(Math.round(totaux.pr))}</td>
-            <td style={{padding:"8px",textAlign:"right",fontSize:11}}></td>
+            <td colSpan={9} style={{padding:"8px",color:T.primary,fontSize:11}}>TOTAL</td>
+            <td style={{padding:"8px",textAlign:"right",color:T.secondary}}></td>
+            <td style={{padding:"8px",textAlign:"right",color:T.warning}}>{fmtS(Math.round(totaux.ds))}</td>
             <td style={{padding:"8px",textAlign:"right",color:T.success,fontSize:13}}>{fmtS(Math.round(totaux.pvt))}</td>
             <td></td>
           </tr>
         </tbody>
       </table></div>}
     </Card>
-    {showNew&&<Modal title="Nouvelle tache" onClose={function(){setShowNew(false);}} onSave={saveTache} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Designation *" value={tForm.libelle} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{libelle:v});});}} full T={T}/><FS label="Unite" value={tForm.unite} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{unite:v});});}} options={UNITES} T={T}/><FF label="Quantite" type="number" value={tForm.quantite} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{quantite:v});});}} T={T}/><FF label="Salaire ouvrier (XOF/j)" type="number" value={tForm.salaire} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{salaire:v});});}} T={T}/><FF label="Rendement (u/j)" type="number" value={tForm.rendement} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{rendement:v});});}} T={T}/><FF label="Materiaux (XOF/u)" type="number" value={tForm.materiau} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{materiau:v});});}} T={T}/><FF label="Materiel (XOF/u)" type="number" value={tForm.materiel} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{materiel:v});});}} T={T}/><FF label="Sous-traitance (XOF/u)" type="number" value={tForm.sous_traitance} onChange={function(v){setTForm(function(pp){return Object.assign({},pp,{sous_traitance:v});});}} T={T}/></FG>}</Modal>}
+    {showNew&&<Modal title="Nouvelle tache" onClose={function(){setShowNew(false);}} onSave={saveTache} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Designation *" value={tForm.libelle} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.libelle=v;return n;});}} full T={T}/><FS label="Unite" value={tForm.unite} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.unite=v;return n;});}} options={UNITES} T={T}/><FF label="Quantite" type="number" value={tForm.quantite} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.quantite=v;return n;});}} T={T}/><FF label="Salaire (XOF/j)" type="number" value={tForm.salaire} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.salaire=v;return n;});}} T={T}/><FF label="Rendement (u/j)" type="number" value={tForm.rendement} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.rendement=v;return n;});}} T={T}/><FF label="Materiaux (XOF/u)" type="number" value={tForm.materiau} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.materiau=v;return n;});}} T={T}/><FF label="Materiel (XOF/u)" type="number" value={tForm.materiel} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.materiel=v;return n;});}} T={T}/><FF label="Sous-traitance (XOF/u)" type="number" value={tForm.sous_traitance} onChange={function(v){setTForm(function(pp){var n=Object.assign({},pp);n.sous_traitance=v;return n;});}} T={T}/></FG>}</Modal>}
   </div>;
 }
 
@@ -865,44 +775,21 @@ function DepensesIntv(p){
   var intv=p.intv,reload=p.reload,T=p.T;
   var _open=useState(false),open=_open[0],setOpen=_open[1];
   var _edit=useState(null),editDep=_edit[0],setEditDep=_edit[1];
-  var _f=useState({libelle:"",montant:"",date:today()}),form=_f[0],setForm=_f[1];
+  var _f=useState({libelle:"",montant:"",date:today(),categorie:"Divers"}),form=_f[0],setForm=_f[1];
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
+  var _err=useState(null),saveErr=_err[0],setSaveErr=_err[1];
   var deps=intv.depenses||[];
   var total=deps.reduce(function(a,d){return a+d.montant;},0);
-  var _err=useState(null),saveErr=_err[0],setSaveErr=_err[1];
-
-  function resetForm(){setEditDep(null);setForm({libelle:"",montant:"",date:today()});setSaveErr(null);}
-  function startEdit(d){setEditDep(d);setForm({libelle:d.libelle||"",montant:String(d.montant||""),date:d.date||today()});setOpen(true);setSaveErr(null);}
+  function resetForm(){setEditDep(null);setForm({libelle:"",montant:"",date:today(),categorie:"Divers"});setSaveErr(null);}
+  function startEdit(d){setEditDep(d);setForm({libelle:d.libelle||"",montant:String(d.montant||""),date:d.date||today(),categorie:d.categorie||"Divers"});setOpen(true);}
   function upF(k,v){setForm(function(pp){var n=Object.assign({},pp);n[k]=v;return n;});}
   function save(){
-    if(!form.libelle||!form.montant)return;
-    setSaving(true);setSaveErr(null);
-    var payload={libelle:form.libelle,montant:parseFloat(form.montant)||0,date:form.date};
-    var op=editDep
-      ?q("intervention_depenses").eq("id",editDep.id).update(payload)
-      :q("intervention_depenses").insert(Object.assign({},payload,{intervention_id:intv.id}));
-    op.then(function(r){
-      console.log("save dep result:", JSON.stringify(r));
-      if(r&&r.error){
-        console.error("save dep error:", r.error);
-        setSaveErr(JSON.stringify(r.error));
-        setSaving(false);
-        return;
-      }
-      setSaving(false);setOpen(false);resetForm();reload();
-    }).catch(function(e){
-      console.error("save dep catch:", e);
-      setSaveErr(e.message);
-      setSaving(false);
-    });
+    if(!form.libelle||!form.montant)return;setSaving(true);setSaveErr(null);
+    var payload={libelle:form.libelle,montant:parseFloat(form.montant)||0,date:form.date,categorie:form.categorie||"Divers"};
+    var op=editDep?q("intervention_depenses").eq("id",editDep.id).update(payload):q("intervention_depenses").insert(Object.assign({},payload,{intervention_id:intv.id}));
+    op.then(function(r){if(r&&r.error){setSaveErr(JSON.stringify(r.error));setSaving(false);return;}setSaving(false);setOpen(false);resetForm();reload();}).catch(function(e){setSaveErr(e.message);setSaving(false);});
   }
-  function del(id){
-    if(!window.confirm("Supprimer ?"))return;
-    q("intervention_depenses").eq("id",id).del().then(function(r){
-      if(r&&r.error){console.error("del dep error:",r.error);return;}
-      reload();
-    });
-  }
+  function del(id){if(!window.confirm("Supprimer ?"))return;q("intervention_depenses").eq("id",id).del().then(function(){reload();});}
   return <div style={{background:T.mid,borderRadius:8,padding:"10px 12px"}}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
       <div><div style={{fontSize:10,color:T.muted}}>Coût total</div><div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(total)}</div></div>
@@ -915,7 +802,7 @@ function DepensesIntv(p){
         <button onClick={function(){startEdit(d);}} style={{background:T.warning+"22",border:"1px solid "+T.warning+"44",color:T.warning,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✏️</button>
         <button onClick={function(){del(d.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>🗑</button>
       </div>;})}
-      <div style={{background:T.card,borderRadius:8,padding:"10px 12px",border:"1px solid "+T.border,marginTop:4}}>
+      <div style={{background:T.card,borderRadius:8,padding:"10px 12px",border:"1px solid "+T.border}}>
         <div style={{fontWeight:600,fontSize:12,marginBottom:8,color:editDep?T.warning:T.primary}}>{editDep?"✏️ Modifier":"+ Nouvelle dépense"}</div>
         {saveErr&&<div style={{background:T.danger+"11",border:"1px solid "+T.danger+"44",borderRadius:6,padding:"6px 10px",fontSize:11,color:T.danger,marginBottom:8}}>⚠️ {saveErr}</div>}
         <FG cols={2}>
@@ -933,26 +820,11 @@ function DepensesIntv(p){
   </div>;
 }
 
-// ── EXPORT INTERVENTIONS ──────────────────────────────────────────────────────
-function exportIntvCSV(data,label){
-  if(!data.length){alert("Aucune intervention.");return;}
-  var rows=data.map(function(i){return{Titre:i.titre,Type:i.type,Statut:i.statut,Intervenant:i.intervenant||"",Chantier:i.chantier||"",Date:i.date_creation||"",Description:i.description||"",Facturee:i.facturee?"Oui":"Non"};});
-  exportCSV(rows,"interventions_"+(label||"export").replace(/\s/g,"_")+".csv");
-}
-function exportIntvHTML(data,label,T){
-  if(!data.length){alert("Aucune intervention.");return;}
-  var TC={Urgence:T.danger,Preventive:T.secondary,Corrective:T.primary,Inspection:"#A855F7"};
-  var rows=data.map(function(i,idx){var bg=idx%2===0?"#fff":"#f9f9f9";var col=TC[i.type]||T.primary;return "<tr style='background:"+bg+"'><td>"+i.titre+"</td><td style='color:"+col+";font-weight:700'>"+i.type+"</td><td>"+i.statut+"</td><td>"+(i.intervenant||"-")+"</td><td>"+(i.chantier||"-")+"</td><td>"+(i.date_creation||"-")+"</td><td>"+(i.facturee?"✅":"❌")+"</td></tr>";}).join("");
-  var style="body{font-family:sans-serif;margin:2cm;font-size:10pt}h1{color:"+T.primary+"}table{width:100%;border-collapse:collapse}th{background:"+T.primary+";color:#fff;padding:8px;text-align:left}td{padding:7px 10px;border-bottom:1px solid #eee}";
-  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>Interventions</title><style>"+style+"</style></head><body><h1>Interventions — "+label+"</h1><table><thead><tr><th>Titre</th><th>Type</th><th>Statut</th><th>Intervenant</th><th>Chantier</th><th>Date</th><th>Facturée</th></tr></thead><tbody>"+rows+"</tbody></table></body></html>";
-  var w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(function(){w.focus();w.print();},500);
-}
-
 // ── INTERVENTIONS ─────────────────────────────────────────────────────────────
 function Interventions(p){
-  var intv=p.intv,ch=p.ch,reload=p.reload,T=p.T;
-  var isMobile=useBP().isMobile;
+  var intv=p.intv,ch=p.ch,reload=p.reload,T=p.T,isMobile=useBP().isMobile;
   var _ft=useState("Tous"),fT=_ft[0],setFT=_ft[1];
+  var _fm2=useState(""),fMois=_fm2[0],setFMois=_fm2[1]; // filtre mois YYYY-MM
   var _n=useState(false),showNew=_n[0],setShowNew=_n[1];
   var _edit=useState(null),editIntv=_edit[0],setEditIntv=_edit[1];
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
@@ -960,20 +832,29 @@ function Interventions(p){
   var _fm=useState(BLANK),form=_fm[0],setForm=_fm[1];
   var STIC={"En attente":T.warning,"En cours":T.secondary,"Terminee":T.success};
   var TC={Urgence:T.danger,Preventive:T.secondary,Corrective:T.primary,Inspection:"#A855F7"};
-  var filtered=intv.filter(function(i){return fT==="Tous"||i.type===fT;});
+
+  // Filtrage combiné type + mois
+  var filtered=intv.filter(function(i){
+    var okType=fT==="Tous"||i.type===fT;
+    var okMois=!fMois||(i.date_creation&&i.date_creation.slice(0,7)===fMois);
+    return okType&&okMois;
+  });
+
   function totalD(i){return(i.depenses||[]).reduce(function(a,d){return a+d.montant;},0);}
   function updSt(id,s){q("interventions").eq("id",id).update({statut:s}).then(function(){reload();});}
   function del(id){if(!window.confirm("Supprimer ?"))return;q("interventions").eq("id",id).del().then(function(){reload();});}
   function openNew(){setForm(BLANK);setEditIntv(null);setShowNew(true);}
   function openEdit(i){setForm({titre:i.titre||"",description:i.description||"",type:i.type||"Corrective",intervenant:i.intervenant||"",chantier:i.chantier||"",date_creation:i.date_creation||today(),statut:i.statut||"En attente",facturee:!!i.facturee});setEditIntv(i);setShowNew(true);}
   function upF(k,v){setForm(function(pp){var n=Object.assign({},pp);n[k]=v;return n;});}
-  function save(){
-    if(!form.titre)return;setSaving(true);
-    var payload={titre:form.titre,description:form.description,type:form.type,intervenant:form.intervenant,chantier:form.chantier,date_creation:form.date_creation,statut:form.statut,facturee:form.facturee};
-    var op=editIntv?q("interventions").eq("id",editIntv.id).update(payload):q("interventions").insert(Object.assign({},payload,{duree:1}));
-    op.then(function(){setSaving(false);setShowNew(false);setEditIntv(null);reload();});
-  }
-  var exportLabel=fT==="Tous"?"toutes":fT;
+  function save(){if(!form.titre)return;setSaving(true);var payload={titre:form.titre,description:form.description,type:form.type,intervenant:form.intervenant,chantier:form.chantier,date_creation:form.date_creation,statut:form.statut,facturee:form.facturee};var op=editIntv?q("interventions").eq("id",editIntv.id).update(payload):q("interventions").insert(Object.assign({},payload,{duree:1}));op.then(function(){setSaving(false);setShowNew(false);setEditIntv(null);reload();});}
+
+  // Génération liste des mois disponibles
+  var moisDispo=[];
+  intv.forEach(function(i){if(i.date_creation&&i.date_creation.length>=7){var m=i.date_creation.slice(0,7);if(!moisDispo.includes(m))moisDispo.push(m);}});
+  moisDispo.sort().reverse();
+
+  var exportLabel=(fMois?MOIS[parseInt(fMois.slice(5,7))-1]+" "+fMois.slice(0,4):"Toutes")+(fT!=="Tous"?" - "+fT:"");
+
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
       <Kpi icon="🔧" label="Total" value={intv.length} color={T.primary} compact={isMobile} T={T}/>
@@ -981,17 +862,30 @@ function Interventions(p){
       <Kpi icon="⚙️" label="En cours" value={intv.filter(function(i){return i.statut==="En cours";}).length} color={T.secondary} compact={isMobile} T={T}/>
       <Kpi icon="💰" label="Cout total" value={fmtS(intv.reduce(function(a,i){return a+totalD(i);},0))} color={T.warning} compact={isMobile} T={T}/>
     </div>
+
     <Card T={T}>
-      <div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:4,overflowX:"auto"}}>{["Tous"].concat(TYPES_INT).map(function(t){return <button key={t} onClick={function(){setFT(t);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(fT===t?T.primary:T.border),background:fT===t?T.primary:"transparent",color:fT===t?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{t}</button>;})}</div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          <button onClick={function(){exportIntvCSV(filtered,exportLabel);}} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>CSV{fT!=="Tous"?" ("+fT+")":""}</button>
-          <button onClick={function(){exportIntvHTML(filtered,exportLabel,T);}} style={{background:T.primary+"22",color:T.primary,border:"1px solid "+T.primary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>PDF{fT!=="Tous"?" ("+fT+")":""}</button>
-          <button onClick={openNew} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button>
-        </div>
+      {/* Filtres type */}
+      <div style={{display:"flex",gap:4,overflowX:"auto",marginBottom:10}}>
+        {["Tous"].concat(TYPES_INT).map(function(t){return <button key={t} onClick={function(){setFT(t);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(fT===t?T.primary:T.border),background:fT===t?T.primary:"transparent",color:fT===t?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{t}</button>;})}
       </div>
-      <div style={{marginTop:8,fontSize:12,color:T.muted}}>{filtered.length} intervention(s){fT!=="Tous"?" — "+fT:""}</div>
+      {/* Filtre mois */}
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:10}}>
+        <span style={{fontSize:12,color:T.muted,whiteSpace:"nowrap"}}>📅 Période :</span>
+        <select value={fMois} onChange={function(e){setFMois(e.target.value);}} style={{background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"6px 10px",color:T.white,fontSize:12,outline:"none"}}>
+          <option value="">Toute la période</option>
+          {moisDispo.map(function(m){var parts=m.split("-");return <option key={m} value={m}>{MOIS[parseInt(parts[1])-1]+" "+parts[0]}</option>;})}
+        </select>
+        {fMois&&<button onClick={function(){setFMois("");}} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer"}}>✕ Effacer</button>}
+        <span style={{fontSize:11,color:T.muted}}>{filtered.length} intervention(s)</span>
+      </div>
+      {/* Actions */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <button onClick={function(){exportIntvCSV(filtered,exportLabel);}} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>CSV {fMois?"("+MOIS[parseInt(fMois.slice(5,7))-1]+")":""}</button>
+        <button onClick={function(){exportIntvHTML(filtered,exportLabel,T);}} style={{background:T.primary+"22",color:T.primary,border:"1px solid "+T.primary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>PDF {fMois?"("+MOIS[parseInt(fMois.slice(5,7))-1]+")":""}</button>
+        <button onClick={openNew} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12,marginLeft:"auto"}}>+ Nouvelle</button>
+      </div>
     </Card>
+
     {filtered.length===0&&<Empty msg="Aucune intervention" icon="🔧"/>}
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
       {filtered.map(function(i){return <div key={i.id} style={{background:T.card,border:"1px solid "+(i.type==="Urgence"?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:16,display:"flex",flexDirection:"column",gap:10}}>
@@ -1028,22 +922,66 @@ function Interventions(p){
 
 // ── KPI ───────────────────────────────────────────────────────────────────────
 function KpiPage(p){
-  var ch=p.ch,intv=p.intv,T=p.T;
-  var isMobile=useBP().isMobile;
+  var ch=p.ch,intv=p.intv,T=p.T,isMobile=useBP().isMobile;
   var totalB=ch.reduce(function(a,c){return a+c.budgetInitial;},0);
   var totalD=ch.reduce(function(a,c){return a+totalDep(c);},0);
   var marge=totalB-totalD,pc=pct(totalD,totalB);
-  var depCat=CATS.map(function(cat){return{cat:cat,total:ch.reduce(function(a,c){return a+c.depenses.filter(function(d){return d.categorie===cat;}).reduce(function(s,d){return s+d.montant;},0);},0)};}).filter(function(x){return x.total>0;});
+  var depCat=CATS.map(function(cat){return{cat:cat.split(" ")[0],total:ch.reduce(function(a,c){return a+c.depenses.filter(function(d){return d.categorie===cat;}).reduce(function(s,d){return s+d.montant;},0);},0)};}).filter(function(x){return x.total>0;});
+
+  // KPIs interventions
+  var totalIntv=intv.length;
+  var intvEnCours=intv.filter(function(i){return i.statut==="En cours";}).length;
+  var intvTerminees=intv.filter(function(i){return i.statut==="Terminee";}).length;
+  var intvUrgences=intv.filter(function(i){return i.type==="Urgence";}).length;
+  var intvFacturees=intv.filter(function(i){return i.facturee;}).length;
+  var coutTotal=intv.reduce(function(a,i){return a+(i.depenses||[]).reduce(function(s,d){return s+d.montant;},0);},0);
+  var tauxResolution=totalIntv>0?Math.round(intvTerminees/totalIntv*100):0;
+
+  // Répartition par type
+  var intvParType=TYPES_INT.map(function(t){return{type:t,nb:intv.filter(function(i){return i.type===t;}).length};});
+
+  // Évolution mensuelle interventions
+  var moisMap={};
+  intv.forEach(function(i){if(i.date_creation&&i.date_creation.length>=7){var m=i.date_creation.slice(0,7);if(!moisMap[m])moisMap[m]={mois:m,nb:0,cout:0};moisMap[m].nb++;moisMap[m].cout+=(i.depenses||[]).reduce(function(s,d){return s+d.montant;},0);}});
+  var intvMensuel=Object.values(moisMap).sort(function(a,b){return a.mois.localeCompare(b.mois);}).slice(-6).map(function(m){var parts=m.mois.split("-");return Object.assign({},m,{label:MOIS[parseInt(parts[1])-1].slice(0,3)+" "+parts[0].slice(2)});});
+
+  // Interventions par chantier
+  var chantierMap={};
+  intv.forEach(function(i){var k=i.chantier||"Non assigné";if(!chantierMap[k])chantierMap[k]=0;chantierMap[k]++;});
+  var intvParChantier=Object.entries(chantierMap).map(function(e){return{chantier:e[0].slice(0,20),nb:e[1]};}).sort(function(a,b){return b.nb-a.nb;}).slice(0,5);
+
   return <div style={{display:"flex",flexDirection:"column",gap:16}}>
+    {/* KPIs chantiers */}
+    <div style={{fontWeight:700,fontSize:14,color:T.primary,borderBottom:"1px solid "+T.border,paddingBottom:8}}>🏗️ Chantiers</div>
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
       <Kpi icon="💰" label="Budget total" value={fmtS(totalB)} compact={isMobile} T={T}/>
       <Kpi icon="🧾" label="Depenses" value={fmtS(totalD)} color={T.warning} compact={isMobile} T={T}/>
       <Kpi icon="💵" label="Marge" value={fmtS(marge)} color={marge>=0?T.success:T.danger} compact={isMobile} T={T}/>
       <Kpi icon="📉" label="Consomme" value={pc+"%"} color={pc>100?T.danger:pc>80?T.warning:T.success} compact={isMobile} T={T}/>
     </div>
+
+    {/* KPIs interventions */}
+    <div style={{fontWeight:700,fontSize:14,color:T.secondary,borderBottom:"1px solid "+T.border,paddingBottom:8,marginTop:8}}>🔧 Interventions</div>
+    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+      <Kpi icon="🔧" label="Total" value={totalIntv} color={T.primary} compact={isMobile} T={T}/>
+      <Kpi icon="⚙️" label="En cours" value={intvEnCours} color={T.secondary} compact={isMobile} T={T}/>
+      <Kpi icon="✅" label="Terminees" value={intvTerminees} color={T.success} compact={isMobile} T={T}/>
+      <Kpi icon="🚨" label="Urgences" value={intvUrgences} color={T.danger} compact={isMobile} T={T}/>
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
+      <Kpi icon="📈" label="Taux résolution" value={tauxResolution+"%"} color={tauxResolution>70?T.success:tauxResolution>40?T.warning:T.danger} compact={isMobile} T={T}/>
+      <Kpi icon="💰" label="Cout interventions" value={fmtS(coutTotal)} color={T.warning} compact={isMobile} T={T}/>
+      <Kpi icon="🧾" label="Facturees" value={intvFacturees+"/"+totalIntv} color={T.success} compact={isMobile} T={T}/>
+      <Kpi icon="💵" label="Non facturees" value={totalIntv-intvFacturees} color={T.danger} compact={isMobile} T={T}/>
+    </div>
+
+    {/* Graphiques */}
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16}}>
-      <Card title="Depenses par categorie" T={T}>{depCat.length>0?<ResponsiveContainer width="100%" height={200}><BarChart data={depCat} layout="vertical" margin={{left:0,right:10}}><XAxis type="number" tick={{fill:T.muted,fontSize:9}} tickFormatter={function(v){return fmtS(v);}}/><YAxis type="category" dataKey="cat" tick={{fill:T.muted,fontSize:10}} width={80}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}} formatter={function(v){return fmt(v);}}/><Bar dataKey="total" radius={[0,4,4,0]}>{depCat.map(function(d,i){return <Cell key={i} fill={catC(d.cat,T)}/>;})}</Bar></BarChart></ResponsiveContainer>:<Empty msg="Aucune depense" icon="📊"/>}</Card>
-      <Card title="Budget par chantier" T={T}>{ch.map(function(c){var d=totalDep(c),pp=pct(d,c.budgetInitial);return <div key={c.id} style={{padding:"8px 0",borderBottom:"1px solid "+T.border}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{fontWeight:600}}>{c.nom}</span><span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span></div><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success} h={6}/></div>;})} {ch.length===0&&<Empty msg="Aucun chantier" icon="📊"/>}</Card>
+      <Card title="Dépenses chantiers par catégorie" T={T}>{depCat.length>0?<ResponsiveContainer width="100%" height={180}><BarChart data={depCat} layout="vertical"><XAxis type="number" tick={{fill:T.muted,fontSize:9}} tickFormatter={function(v){return fmtS(v);}}/><YAxis type="category" dataKey="cat" tick={{fill:T.muted,fontSize:10}} width={70}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}} formatter={function(v){return fmt(v);}}/><Bar dataKey="total" radius={[0,4,4,0]}>{depCat.map(function(d,i){return <Cell key={i} fill={catC(d.cat,T)}/>;})}</Bar></BarChart></ResponsiveContainer>:<Empty msg="Aucune depense" icon="📊"/>}</Card>
+      <Card title="Interventions par type" T={T}><ResponsiveContainer width="100%" height={180}><BarChart data={intvParType}><XAxis dataKey="type" tick={{fill:T.muted,fontSize:9}}/><YAxis tick={{fill:T.muted,fontSize:9}}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/><Bar dataKey="nb" radius={[4,4,0,0]}>{intvParType.map(function(d,i){var cols=[T.danger,T.secondary,T.primary,"#A855F7"];return <Cell key={i} fill={cols[i%cols.length]}/>;})}</Bar></BarChart></ResponsiveContainer></Card>
+      {intvMensuel.length>0&&<Card title="Évolution mensuelle interventions" T={T}><ResponsiveContainer width="100%" height={180}><LineChart data={intvMensuel}><XAxis dataKey="label" tick={{fill:T.muted,fontSize:10}}/><YAxis yAxisId="nb" tick={{fill:T.muted,fontSize:9}}/><YAxis yAxisId="cout" orientation="right" tick={{fill:T.muted,fontSize:9}} tickFormatter={function(v){return fmtS(v);}}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/><Line yAxisId="nb" type="monotone" dataKey="nb" stroke={T.secondary} strokeWidth={2} dot={true} name="Nb interventions"/><Line yAxisId="cout" type="monotone" dataKey="cout" stroke={T.warning} strokeWidth={2} dot={true} name="Coût"/></LineChart></ResponsiveContainer></Card>}
+      {intvParChantier.length>0&&<Card title="Interventions par chantier (top 5)" T={T}><ResponsiveContainer width="100%" height={180}><BarChart data={intvParChantier} layout="vertical"><XAxis type="number" tick={{fill:T.muted,fontSize:9}}/><YAxis type="category" dataKey="chantier" tick={{fill:T.muted,fontSize:9}} width={100}/><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/><Bar dataKey="nb" fill={T.secondary} radius={[0,4,4,0]}/></BarChart></ResponsiveContainer></Card>}
+      <Card title="Budget par chantier" T={T}>{ch.map(function(c){var d=totalDep(c),pp=pct(d,c.budgetInitial);return <div key={c.id} style={{padding:"7px 0",borderBottom:"1px solid "+T.border}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}><span style={{fontWeight:600}}>{c.nom}</span><span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span></div><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success} h={6}/></div>;})} {ch.length===0&&<Empty msg="Aucun chantier" icon="📊"/>}</Card>
     </div>
   </div>;
 }
@@ -1057,65 +995,54 @@ function IA(p){
   function run(){
     setLoading(true);setError(null);setResult(null);
     var ctx={chantiers:ch.map(function(c){return{nom:c.nom,statut:c.statut,budget:c.budgetInitial,depenses:totalDep(c),pct:pct(totalDep(c),c.budgetInitial)};}),interventions:intv.slice(0,20).map(function(i){return{titre:i.titre,type:i.type,statut:i.statut};})};
-    aiCall({model:AI_MODEL,max_tokens:1200,messages:[{role:"user",content:"Tu es expert BTP Cote d'Ivoire. Analyse ce portefeuille (XOF). Reponds UNIQUEMENT en JSON valide:\n"+JSON.stringify(ctx)+"\n\nFormat: {\"recommandations\":[{\"titre\":\"string\",\"detail\":\"string\",\"priorite\":\"haute\"}],\"scoreGlobal\":75,\"synthese\":\"string\",\"pointsForts\":[\"string\"],\"risques\":[\"string\"]}"}]})
-      .then(function(data){var txt=(data.content||[]).map(function(i){return i.text||"";}).join("");var jm=txt.match(/\{[\s\S]*\}/);if(!jm)throw new Error("JSON invalide");setResult(JSON.parse(jm[0]));setLoading(false);})
+    aiCall({model:AI_MODEL,max_tokens:1500,messages:[{role:"user",content:"Expert BTP CI. Analyse ce portefeuille XOF. JSON valide uniquement:\n"+JSON.stringify(ctx)+"\nFormat: {\"recommandations\":[{\"titre\":\"str\",\"detail\":\"str\",\"priorite\":\"haute\"}],\"scoreGlobal\":75,\"synthese\":\"str\",\"pointsForts\":[\"str\"],\"risques\":[\"str\"]}"}]})
+      .then(function(data){var txt=(data.content||[]).map(function(i){return i.text||"";}).join("");var parsed=safeParseJSON(txt);if(!parsed)throw new Error("JSON invalide");setResult(parsed);setLoading(false);})
       .catch(function(e){setError("Erreur: "+e.message);setLoading(false);});
   }
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{background:T.primary+"11",border:"1px solid "+T.primary+"44",borderRadius:T.borderRadius,padding:20}}>
       <div style={{fontSize:20,fontWeight:800,marginBottom:4}}>Analyse IA du portefeuille</div>
-      <div style={{color:T.muted,fontSize:13,marginBottom:14}}>{ch.length} chantier(s) - {intv.length} interventions</div>
+      <div style={{color:T.muted,fontSize:13,marginBottom:14}}>{ch.length} chantier(s) — {intv.length} interventions</div>
       <button onClick={run} disabled={loading} style={{background:T.primary,color:"#fff",border:"none",borderRadius:10,padding:"10px 24px",fontWeight:700,cursor:loading?"wait":"pointer",fontSize:14}}>{loading?"Analyse...":"Lancer l'analyse"}</button>
       {error&&<div style={{color:T.danger,fontSize:12,marginTop:10}}>{error}</div>}
     </div>
     {!result&&!loading&&<Empty msg="Lancez l'analyse pour obtenir des recommandations IA" icon="🤖"/>}
     {loading&&<Spin/>}
     {result&&<div style={{display:"flex",flexDirection:"column",gap:14}}>
-      <div style={{background:T.primary+"11",border:"1px solid "+T.primary+"44",borderRadius:T.borderRadius,padding:18}}>
+      <Card T={T}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><div style={{fontWeight:800,fontSize:16}}>Synthese</div><div style={{background:(result.scoreGlobal>70?T.success:result.scoreGlobal>40?T.warning:T.danger)+"22",borderRadius:8,padding:"6px 16px",fontWeight:800,fontSize:18,color:result.scoreGlobal>70?T.success:result.scoreGlobal>40?T.warning:T.danger}}>Score {result.scoreGlobal}/100</div></div>
         <div style={{fontSize:13,color:T.muted,marginBottom:12}}>{result.synthese}</div>
         {result.pointsForts&&result.pointsForts.length>0&&<div style={{marginBottom:10}}><div style={{fontWeight:700,color:T.success,fontSize:12,marginBottom:6}}>Points forts</div>{result.pointsForts.map(function(pp,i){return <div key={i} style={{fontSize:12,color:T.muted,marginBottom:3}}>✅ {pp}</div>;})}</div>}
         {result.risques&&result.risques.length>0&&<div><div style={{fontWeight:700,color:T.danger,fontSize:12,marginBottom:6}}>Risques</div>{result.risques.map(function(r,i){return <div key={i} style={{fontSize:12,color:T.muted,marginBottom:3}}>⚠️ {r}</div>;})}</div>}
-      </div>
-      <Card title="Recommandations" T={T}>{(result.recommandations||[]).map(function(r,i){var col=r.priorite==="haute"?T.danger:r.priorite==="moyenne"?T.warning:T.success;return <div key={i} style={{background:col+"11",border:"1px solid "+col+"33",borderRadius:8,padding:14,marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:6}}><div style={{fontWeight:700,color:col,fontSize:13}}>{r.titre}</div><Badge label={"Priorite "+r.priorite} color={col} small/></div><div style={{fontSize:12,color:T.muted}}>{r.detail}</div></div>;})}  </Card>
+      </Card>
+      <Card title="Recommandations" T={T}>{(result.recommandations||[]).map(function(r,i){var col=r.priorite==="haute"?T.danger:r.priorite==="moyenne"?T.warning:T.success;return <div key={i} style={{background:col+"11",border:"1px solid "+col+"33",borderRadius:8,padding:14,marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:6}}><div style={{fontWeight:700,color:col,fontSize:13}}>{r.titre}</div><Badge label={"Priorite "+r.priorite} color={col} small/></div><div style={{fontSize:12,color:T.muted}}>{r.detail}</div></div>;})}</Card>
     </div>}
   </div>;
 }
 
-// ── GESTION ───────────────────────────────────────────────────────────────────
 function Gestion(p){
   var ch=p.ch,openCh=p.openCh,reload=p.reload,T=p.T;
   var _c=useState(null),confirm=_c[0],setConfirm=_c[1];
   var _s=useState(""),search=_s[0],setSearch=_s[1];
   var filtered=ch.filter(function(c){return(c.nom+c.client).toLowerCase().indexOf(search.toLowerCase())>=0;});
   function del(id){q("chantiers").eq("id",id).del().then(function(){setConfirm(null);reload();});}
-  return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <Card title="Tous les projets" T={T}>
-      <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Rechercher..." style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 14px",color:T.white,fontSize:14,boxSizing:"border-box",outline:"none",marginBottom:14}}/>
-      {filtered.map(function(c){var dep=totalDep(c),pp=pct(dep,c.budgetInitial);return <div key={c.id} style={{background:T.mid,border:"1px solid "+(confirm===c.id?T.danger+"88":T.border),borderRadius:T.borderRadius,padding:"12px 14px",marginBottom:8}}>
-        {confirm===c.id?<div><div style={{fontWeight:700,color:T.danger,marginBottom:8}}>Supprimer "{c.nom}" ?</div><div style={{display:"flex",gap:10}}><button onClick={function(){setConfirm(null);}} style={{flex:1,padding:"9px",background:T.card,color:T.white,border:"1px solid "+T.border,borderRadius:8,cursor:"pointer"}}>Annuler</button><button onClick={function(){del(c.id);}} style={{flex:1,padding:"9px",background:T.danger,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700}}>Confirmer</button></div></div>
-        :<div><div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}><div><div style={{fontWeight:700,fontSize:14}}>{c.nom}</div><div style={{fontSize:11,color:T.muted}}>{c.client} - {c.type}</div></div><Badge label={c.statut} color={stC(c.statut,T)} small/></div><div style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.muted,marginBottom:3}}><span>{fmt(dep)}</span><span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span></div><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success} h={6}/></div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button onClick={function(){openCh(c.id);}} style={{background:T.secondary+"22",border:"1px solid "+T.secondary+"44",color:T.secondary,borderRadius:7,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:600}}>Ouvrir</button><button onClick={function(){setConfirm(c.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:7,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:700}}>✕</button></div></div>}
-      </div>;})}
-      {filtered.length===0&&<Empty msg="Aucun resultat" icon="🔍"/>}
-    </Card>
-  </div>;
+  return <div style={{display:"flex",flexDirection:"column",gap:14}}><Card title="Tous les projets" T={T}>
+    <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Rechercher..." style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"10px 14px",color:T.white,fontSize:14,boxSizing:"border-box",outline:"none",marginBottom:14}}/>
+    {filtered.map(function(c){var dep=totalDep(c),pp=pct(dep,c.budgetInitial);return <div key={c.id} style={{background:T.mid,border:"1px solid "+(confirm===c.id?T.danger+"88":T.border),borderRadius:T.borderRadius,padding:"12px 14px",marginBottom:8}}>
+      {confirm===c.id?<div><div style={{fontWeight:700,color:T.danger,marginBottom:8}}>Supprimer "{c.nom}" ?</div><div style={{display:"flex",gap:10}}><button onClick={function(){setConfirm(null);}} style={{flex:1,padding:"9px",background:T.card,color:T.white,border:"1px solid "+T.border,borderRadius:8,cursor:"pointer"}}>Annuler</button><button onClick={function(){del(c.id);}} style={{flex:1,padding:"9px",background:T.danger,color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700}}>Confirmer</button></div></div>
+      :<div><div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}><div><div style={{fontWeight:700,fontSize:14}}>{c.nom}</div><div style={{fontSize:11,color:T.muted}}>{c.client} - {c.type}</div></div><Badge label={c.statut} color={stC(c.statut,T)} small/></div><div style={{marginBottom:8}}><div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:T.muted,marginBottom:3}}><span>{fmt(dep)}</span><span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span></div><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success} h={6}/></div><div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><button onClick={function(){openCh(c.id);}} style={{background:T.secondary+"22",border:"1px solid "+T.secondary+"44",color:T.secondary,borderRadius:7,padding:"7px 14px",fontSize:12,cursor:"pointer",fontWeight:600}}>Ouvrir</button><button onClick={function(){setConfirm(c.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:7,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:700}}>✕</button></div></div>}
+    </div>;})}
+    {filtered.length===0&&<Empty msg="Aucun resultat" icon="🔍"/>}
+  </Card></div>;
 }
 
-// ── PARAMETRES ────────────────────────────────────────────────────────────────
 function Parametres(p){
-  var T=p.T,upT=p.upT,resetT=p.resetT;
-  var isMobile=useBP().isMobile;
+  var T=p.T,upT=p.upT,resetT=p.resetT,isMobile=useBP().isMobile;
   var presets=[{label:"BTP Orange",colors:{primary:"#F97316",secondary:"#3B82F6",bg:"#1C1917",card:"#292524"}},{label:"Bleu Pro",colors:{primary:"#2563EB",secondary:"#7C3AED",bg:"#0F172A",card:"#1E293B"}},{label:"Vert Nature",colors:{primary:"#16A34A",secondary:"#0891B2",bg:"#14532D",card:"#166534"}},{label:"Rouge BTP",colors:{primary:"#DC2626",secondary:"#D97706",bg:"#1C0A0A",card:"#2C1010"}},{label:"Dark Pro",colors:{primary:"#6366F1",secondary:"#EC4899",bg:"#000000",card:"#111111"}}];
   var companyFields=[["Nom","companyName"],["Adresse","companyAddress"],["Telephone","companyTel"],["Email","companyEmail"],["SIRET / RC","companySiret"]];
   return <div style={{display:"flex",flexDirection:"column",gap:20}}>
-    <Card title="Themes predéfinis" T={T}>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(5,1fr)",gap:10}}>
-        {presets.map(function(pp){return <button key={pp.label} onClick={function(){Object.keys(pp.colors).forEach(function(k){upT(k,pp.colors[k]);});}} style={{background:pp.colors.card,border:"2px solid "+pp.colors.primary,borderRadius:10,padding:"12px 10px",cursor:"pointer",textAlign:"left"}}><div style={{display:"flex",gap:4,marginBottom:6}}>{Object.values(pp.colors).map(function(c,i){return <div key={i} style={{width:14,height:14,borderRadius:"50%",background:c}}/>;})}</div><div style={{fontSize:11,fontWeight:700,color:pp.colors.primary}}>{pp.label}</div></button>;})}
-      </div>
-    </Card>
-    <Card title="Informations entreprise" T={T}>
-      {companyFields.map(function(row){return <div key={row[1]} style={{padding:"10px 0",borderBottom:"1px solid "+T.border}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>{row[0]}</label><input value={T[row[1]]||""} onChange={function(e){upT(row[1],e.target.value);}} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"8px 12px",color:T.white,fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>;})}
-    </Card>
+    <Card title="Themes" T={T}><div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(5,1fr)",gap:10}}>{presets.map(function(pp){return <button key={pp.label} onClick={function(){Object.keys(pp.colors).forEach(function(k){upT(k,pp.colors[k]);});}} style={{background:pp.colors.card,border:"2px solid "+pp.colors.primary,borderRadius:10,padding:"12px 10px",cursor:"pointer",textAlign:"left"}}><div style={{display:"flex",gap:4,marginBottom:6}}>{Object.values(pp.colors).map(function(c,i){return <div key={i} style={{width:14,height:14,borderRadius:"50%",background:c}}/>;})}</div><div style={{fontSize:11,fontWeight:700,color:pp.colors.primary}}>{pp.label}</div></button>;})}</div></Card>
+    <Card title="Entreprise" T={T}>{companyFields.map(function(row){return <div key={row[1]} style={{padding:"10px 0",borderBottom:"1px solid "+T.border}}><label style={{fontSize:11,color:T.muted,display:"block",marginBottom:4}}>{row[0]}</label><input value={T[row[1]]||""} onChange={function(e){upT(row[1],e.target.value);}} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:8,padding:"8px 12px",color:T.white,fontSize:14,outline:"none",boxSizing:"border-box"}}/></div>;})}</Card>
     <div style={{display:"flex",justifyContent:"flex-end"}}><button onClick={resetT} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:8,padding:"10px 20px",fontWeight:700,cursor:"pointer"}}>Reinitialiser</button></div>
   </div>;
 }
