@@ -350,32 +350,33 @@ function IAOuvrageModal(p){
         +"Coffrage bois|m2|8|5500|4|9500|0|0|Mixte|coffreur|1\n"
         +"Beton arme C25|m3|2.4|6000|2|115000|15000|0|Mixte|macon|3\n"
         +"Max 15 lignes. Commence directement.";
-      var data=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:3000,messages:[{role:"user",content:prompt}]});
+      var data=await callWithRetry({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:prompt}]});
       var txt=(data.content||[]).map(function(i){return i.text||"";}).join("").trim();
-      // Parser CSV pipe — robuste
-      var lines=txt.split("\n").map(function(l){return l.trim();}).filter(function(l){return l.indexOf("|")>=2&&l.length>5;});
+      // Parser CSV pipe — robuste, pas de JSON
+      var lines=txt.split("\n").map(function(l){return l.trim();}).filter(function(l){
+        return l.indexOf("|")>=2&&l.length>5&&!/^(libelle|designation|element|#)/i.test(l.split("|")[0]);
+      });
       var items=[];
       lines.forEach(function(line){
-        line=line.trim();
-        if(!line)return;
-        var parts=line.split("|");
-        if(parts.length<8)return;
-        var lib=parts[0].replace(/^[-*•\d.]+\s*/,"").trim();
-        if(!lib||lib.length<2)return;
-        if(/^(libelle|designation|element|tache|ouvrage)/i.test(lib))return;
-        items.push({
-          libelle:lib,
-          unite:String(parts[1]||"U").trim(),
-          quantite:parseNum(parts[2])||1,
-          salaire:parseNum(parts[3])||0,
-          rendement:parseNum(parts[4])||1,
-          materiau:parseNum(parts[5])||0,
-          materiel:parseNum(parts[6])||0,
-          sous_traitance:parseNum(parts[7])||0,
-          categorie:String(parts[8]||"Mixte").trim(),
-          typeOuvrier:String(parts[9]||"").trim(),
-          nbOuvriers:parseInt(parts[10])||1
-        });
+        try{
+          var parts=line.split("|");
+          if(parts.length<8)return;
+          var lib=parts[0].replace(/^[-*•\d.]+\s*/,"").trim();
+          if(!lib||lib.length<2)return;
+          items.push({
+            libelle:lib,
+            unite:String(parts[1]||"U").trim().slice(0,10),
+            quantite:parseNum(parts[2])||1,
+            salaire:parseNum(parts[3])||0,
+            rendement:parseNum(parts[4])||1,
+            materiau:parseNum(parts[5])||0,
+            materiel:parseNum(parts[6])||0,
+            sous_traitance:parseNum(parts[7])||0,
+            categorie:String(parts[8]||"Mixte").trim().slice(0,20),
+            typeOuvrier:String(parts[9]||"").trim().slice(0,20),
+            nbOuvriers:parseInt(parts[10])||1
+          });
+        }catch(e){}
       });
       if(!items.length)throw new Error("Aucun element extrait — reformulez l ouvrage");
       // Calcul totaux par categorie
@@ -665,20 +666,50 @@ function SessionDetail(p){
 }
 
 // ── INTERVENTIONS ─────────────────────────────────────────────────────────────
+function exportIntvCSV(data,label){
+  if(!data.length){alert("Aucune intervention.");return;}
+  var rows=data.map(function(i){return{Titre:i.titre,Type:i.type,Statut:i.statut,Intervenant:i.intervenant||"",Chantier:i.chantier||"",Date:i.date_creation||"",Description:i.description||"",Facturee:i.facturee?"Oui":"Non"};});
+  exportCSV(rows,"interventions_"+(label||"export").replace(/\s/g,"_")+".csv");
+}
+function exportIntvHTML(data,label,T){
+  if(!data.length){alert("Aucune intervention.");return;}
+  var TC={Urgence:T.danger,Preventive:T.secondary,Corrective:T.primary,Inspection:"#A855F7"};
+  var rows=data.map(function(i,idx){var bg=idx%2===0?"#fff":"#f9f9f9";var col=TC[i.type]||T.primary;return "<tr style='background:"+bg+"'><td>"+i.titre+"</td><td style='color:"+col+";font-weight:700'>"+i.type+"</td><td>"+i.statut+"</td><td>"+(i.intervenant||"-")+"</td><td>"+(i.chantier||"-")+"</td><td>"+(i.date_creation||"-")+"</td><td>"+(i.facturee?"✅":"❌")+"</td></tr>";}).join("");
+  var style="body{font-family:sans-serif;margin:2cm;font-size:10pt}h1{color:"+T.primary+"}table{width:100%;border-collapse:collapse}th{background:"+T.primary+";color:#fff;padding:8px;text-align:left}td{padding:7px 10px;border-bottom:1px solid #eee}";
+  var html="<!DOCTYPE html><html><head><meta charset='utf-8'><title>Interventions - "+label+"</title><style>"+style+"</style></head><body><h1>Interventions — "+label+"</h1><table><thead><tr><th>Titre</th><th>Type</th><th>Statut</th><th>Intervenant</th><th>Chantier</th><th>Date</th><th>Facturée</th></tr></thead><tbody>"+rows+"</tbody></table></body></html>";
+  var w=window.open("","_blank");w.document.write(html);w.document.close();setTimeout(function(){w.focus();w.print();},500);
+}
+
 function Interventions(p){
   var intv=p.intv,ch=p.ch,reload=p.reload,T=p.T;
   var isMobile=useBP().isMobile;
   var _ft=useState("Tous"),fT=_ft[0],setFT=_ft[1];
   var _n=useState(false),showNew=_n[0],setShowNew=_n[1];
+  var _edit=useState(null),editIntv=_edit[0],setEditIntv=_edit[1];
   var _sv=useState(false),saving=_sv[0],setSaving=_sv[1];
-  var _fm=useState({titre:"",description:"",type:"Corrective",intervenant:"",chantier:"",date_creation:today(),statut:"En attente"}),form=_fm[0],setForm=_fm[1];
+  var BLANK={titre:"",description:"",type:"Corrective",intervenant:"",chantier:"",date_creation:today(),statut:"En attente",facturee:false};
+  var _fm=useState(BLANK),form=_fm[0],setForm=_fm[1];
   var STIC={"En attente":T.warning,"En cours":T.secondary,"Terminee":T.success};
   var TC={Urgence:T.danger,Preventive:T.secondary,Corrective:T.primary,Inspection:"#A855F7"};
   var filtered=intv.filter(function(i){return fT==="Tous"||i.type===fT;});
   function totalD(i){return(i.depenses||[]).reduce(function(a,d){return a+d.montant;},0);}
   function updSt(id,s){q("interventions").eq("id",id).update({statut:s}).then(function(){reload();});}
-  function del(id){q("interventions").eq("id",id).del().then(function(){reload();});}
-  function save(){if(!form.titre)return;setSaving(true);q("interventions").insert({titre:form.titre,description:form.description,type:form.type,intervenant:form.intervenant,chantier:form.chantier,date_creation:form.date_creation,duree:1,statut:form.statut,facturee:false}).then(function(){setSaving(false);setShowNew(false);reload();});}
+  function del(id){if(!window.confirm("Supprimer ?"))return;q("interventions").eq("id",id).del().then(function(){reload();});}
+
+  function openNew(){setForm(BLANK);setEditIntv(null);setShowNew(true);}
+  function openEdit(i){setForm({titre:i.titre||"",description:i.description||"",type:i.type||"Corrective",intervenant:i.intervenant||"",chantier:i.chantier||"",date_creation:i.date_creation||today(),statut:i.statut||"En attente",facturee:i.facturee||false});setEditIntv(i);setShowNew(true);}
+  function upF(k,v){setForm(function(pp){return Object.assign({},pp,[k],{[k]:v});});}
+
+  function save(){
+    if(!form.titre)return;
+    setSaving(true);
+    var payload={titre:form.titre,description:form.description,type:form.type,intervenant:form.intervenant,chantier:form.chantier,date_creation:form.date_creation,statut:form.statut,facturee:form.facturee};
+    var op=editIntv?q("interventions").eq("id",editIntv.id).update(payload):q("interventions").insert(Object.assign({},payload,{duree:1}));
+    op.then(function(){setSaving(false);setShowNew(false);setEditIntv(null);reload();});
+  }
+
+  var exportLabel=fT==="Tous"?"toutes":fT;
+
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10}}>
       <Kpi icon="🔧" label="Total" value={intv.length} color={T.primary} compact={isMobile} T={T}/>
@@ -686,22 +717,63 @@ function Interventions(p){
       <Kpi icon="⚙️" label="En cours" value={intv.filter(function(i){return i.statut==="En cours";}).length} color={T.secondary} compact={isMobile} T={T}/>
       <Kpi icon="💰" label="Cout total" value={fmtS(intv.reduce(function(a,i){return a+totalD(i);},0))} color={T.warning} compact={isMobile} T={T}/>
     </div>
+
+    {/* Filtres + actions export */}
     <Card T={T}>
-      <div style={{display:"flex",gap:4,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
-        <div style={{display:"flex",gap:4,overflowX:"auto"}}>{["Tous"].concat(TYPES_INT).map(function(t){return <button key={t} onClick={function(){setFT(t);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(fT===t?T.primary:T.border),background:fT===t?T.primary:"transparent",color:fT===t?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{t}</button>;})}</div>
-        <button onClick={function(){setShowNew(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12,flexShrink:0}}>+ Nouvelle</button>
+      <div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:4,overflowX:"auto",flexWrap:"nowrap"}}>
+          {["Tous"].concat(TYPES_INT).map(function(t){return <button key={t} onClick={function(){setFT(t);}} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(fT===t?T.primary:T.border),background:fT===t?T.primary:"transparent",color:fT===t?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{t}</button>;})}
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
+          <button onClick={function(){exportIntvCSV(filtered,exportLabel);}} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>CSV {fT!=="Tous"?"("+fT+")":""}</button>
+          <button onClick={function(){exportIntvHTML(filtered,exportLabel,T);}} style={{background:T.primary+"22",color:T.primary,border:"1px solid "+T.primary+"44",borderRadius:8,padding:"6px 12px",fontWeight:700,cursor:"pointer",fontSize:12}}>PDF {fT!=="Tous"?"("+fT+")":""}</button>
+          <button onClick={openNew} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"6px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle</button>
+        </div>
       </div>
+      {/* Compteur */}
+      <div style={{marginTop:10,fontSize:12,color:T.muted}}>{filtered.length} intervention(s) affichée(s){fT!=="Tous"?" — filtre : "+fT:""}</div>
     </Card>
+
     {filtered.length===0&&<Empty msg="Aucune intervention" icon="🔧"/>}
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(340px,1fr))",gap:12}}>
       {filtered.map(function(i){return <div key={i.id} style={{background:T.card,border:"1px solid "+(i.type==="Urgence"?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:16,display:"flex",flexDirection:"column",gap:10}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{i.titre}</div><div style={{fontSize:11,color:T.muted}}>{i.chantier||"-"} - {i.date_creation}</div></div><Badge label={i.type} color={TC[i.type]||T.primary} small/></div>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
+          <div style={{flex:1}}><div style={{fontWeight:700,fontSize:14}}>{i.titre}</div><div style={{fontSize:11,color:T.muted}}>{i.chantier||"-"} — {i.date_creation}</div></div>
+          <Badge label={i.type} color={TC[i.type]||T.primary} small/>
+        </div>
+        {i.intervenant&&<div style={{fontSize:12,color:T.muted}}>👷 {i.intervenant}</div>}
         {i.description&&<div style={{fontSize:12,color:T.muted,background:T.mid,borderRadius:6,padding:"7px 10px"}}>{i.description}</div>}
-        <div style={{background:T.mid,borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><div style={{fontSize:10,color:T.muted}}>Cout</div><div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(totalD(i))}</div></div><Badge label={i.facturee?"Facturee":"Non facturee"} color={i.facturee?T.success:T.danger} small/></div>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}><select value={i.statut} onChange={function(e){updSt(i.id,e.target.value);}} style={{flex:1,background:(STIC[i.statut]||T.muted)+"22",border:"1px solid "+(STIC[i.statut]||T.muted)+"55",borderRadius:6,padding:"5px 10px",color:STIC[i.statut]||T.muted,fontSize:12,cursor:"pointer",outline:"none",fontWeight:700}}>{["En attente","En cours","Terminee"].map(function(s){return <option key={s} value={s}>{s}</option>;})}</select><button onClick={function(){del(i.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>X</button></div>
+        <div style={{background:T.mid,borderRadius:8,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontSize:10,color:T.muted}}>Cout</div><div style={{fontWeight:800,color:T.primary,fontSize:15}}>{fmt(totalD(i))}</div></div>
+          <Badge label={i.facturee?"Facturee":"Non facturee"} color={i.facturee?T.success:T.danger} small/>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <select value={i.statut} onChange={function(e){updSt(i.id,e.target.value);}} style={{flex:1,background:(STIC[i.statut]||T.muted)+"22",border:"1px solid "+(STIC[i.statut]||T.muted)+"55",borderRadius:6,padding:"5px 10px",color:STIC[i.statut]||T.muted,fontSize:12,cursor:"pointer",outline:"none",fontWeight:700}}>
+            {["En attente","En cours","Terminee"].map(function(s){return <option key={s} value={s}>{s}</option>;})}
+          </select>
+          <button onClick={function(){openEdit(i);}} style={{background:T.warning+"22",border:"1px solid "+T.warning+"44",color:T.warning,borderRadius:6,padding:"6px 10px",fontSize:12,cursor:"pointer",fontWeight:700}}>✏️</button>
+          <button onClick={function(){del(i.id);}} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:6,padding:"6px 10px",fontSize:12,cursor:"pointer"}}>🗑</button>
+        </div>
       </div>;})}
     </div>
-    {showNew&&<Modal title="Nouvelle intervention" onClose={function(){setShowNew(false);}} onSave={save} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Titre *" value={form.titre} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{titre:v});});}} full T={T}/><FS label="Type" value={form.type} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{type:v});});}} options={TYPES_INT} T={T}/><FS label="Statut" value={form.statut} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{statut:v});});}} options={["En attente","En cours","Terminee"]} T={T}/><FF label="Intervenant" value={form.intervenant} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{intervenant:v});});}} T={T}/><FS label="Chantier" value={form.chantier} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{chantier:v});});}} options={[""].concat(ch.map(function(c){return c.nom;}))} T={T}/><FF label="Date" type="date" value={form.date_creation} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{date_creation:v});});}} T={T}/><FF label="Description" value={form.description} onChange={function(v){setForm(function(pp){return Object.assign({},pp,{description:v});});}} rows={3} full T={T}/></FG>}</Modal>}
+
+    {showNew&&<Modal title={editIntv?"Modifier l'intervention":"Nouvelle intervention"} onClose={function(){setShowNew(false);setEditIntv(null);}} onSave={save} saveLabel={editIntv?"Enregistrer":"Créer"} T={T}>
+      {saving?<Spin/>:<div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <FG cols={2}>
+          <FF label="Titre *" value={form.titre} onChange={function(v){upF("titre",v);}} full T={T}/>
+          <FS label="Type" value={form.type} onChange={function(v){upF("type",v);}} options={TYPES_INT} T={T}/>
+          <FS label="Statut" value={form.statut} onChange={function(v){upF("statut",v);}} options={["En attente","En cours","Terminee"]} T={T}/>
+          <FF label="Intervenant" value={form.intervenant} onChange={function(v){upF("intervenant",v);}} T={T}/>
+          <FS label="Chantier" value={form.chantier} onChange={function(v){upF("chantier",v);}} options={[""].concat(ch.map(function(c){return c.nom;}))} T={T}/>
+          <FF label="Date" type="date" value={form.date_creation} onChange={function(v){upF("date_creation",v);}} T={T}/>
+          <FF label="Description" value={form.description} onChange={function(v){upF("description",v);}} rows={3} full T={T}/>
+        </FG>
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderTop:"1px solid "+T.border}}>
+          <input type="checkbox" id="facturee" checked={!!form.facturee} onChange={function(e){upF("facturee",e.target.checked);}} style={{width:18,height:18,cursor:"pointer"}}/>
+          <label htmlFor="facturee" style={{fontSize:13,cursor:"pointer",fontWeight:600}}>Marquée comme facturée</label>
+        </div>
+      </div>}
+    </Modal>}
   </div>;
 }
 
