@@ -215,44 +215,128 @@ function Dashboard({ch,intv,openCh,T,isMobile,navTo}){
 }
 
 // ── CHANTIERS ─────────────────────────────────────────────────────────────────
+const emptyChForm=()=>({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",montant_global:"",date_debut:"",date_fin:"",description:""});
+
+function ChantierFormFields({form,up,T,ch}){
+  return <FG cols={2}>
+    <FF label="Nom *" value={form.nom} onChange={v=>up("nom",v)} full T={T}/>
+    <FF label="Client" value={form.client} onChange={v=>up("client",v)} T={T}/>
+    <FS label="Type" value={form.type} onChange={v=>up("type",v)} options={TYPES_CH} T={T}/>
+    <FF label="Localisation" value={form.localisation} onChange={v=>up("localisation",v)} T={T}/>
+    <FF label="Montant global du projet (XOF)" type="number" value={form.montant_global} onChange={v=>up("montant_global",v)} T={T}/>
+    <FF label="Budget initial (XOF)" type="number" value={form.budget_initial} onChange={v=>up("budget_initial",v)} T={T}/>
+    <FF label="Date début" type="date" value={form.date_debut} onChange={v=>up("date_debut",v)} T={T}/>
+    <FF label="Date fin prévue" type="date" value={form.date_fin} onChange={v=>up("date_fin",v)} T={T}/>
+    <FF label="Description" value={form.description} onChange={v=>up("description",v)} rows={2} full T={T}/>
+  </FG>;
+}
+
 function Chantiers({ch,openCh,reload,T,isMobile}){
-  const [filter,setFilter]=useState("Tous");const [showNew,setShowNew]=useState(false);const [saving,setSaving]=useState(false);
-  const [form,setForm]=useState({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",date_debut:"",date_fin:"",description:""});
+  const [filter,setFilter]=useState("Tous");
+  const [showNew,setShowNew]=useState(false);
+  const [editCh,setEditCh]=useState(null);
+  const [saving,setSaving]=useState(false);
+  const [form,setForm]=useState(emptyChForm());
   const up=(k,v)=>setForm(p=>({...p,[k]:v}));
+
   function save(){
     if(!form.nom){alert("Le nom est obligatoire");return;}
-    if(!form.budget_initial){alert("Le budget est obligatoire");return;}
     setSaving(true);
     sb("chantiers").insert({
-      nom:form.nom,
-      client:form.client||null,
-      localisation:form.localisation||null,
-      type:form.type||null,
-      budget_initial:parseFloat(form.budget_initial),
-      date_debut:form.date_debut||null,
-      date_fin:form.date_fin||null,
+      nom:form.nom, client:form.client||null, localisation:form.localisation||null,
+      type:form.type||null, statut:"Brouillon",
+      budget_initial:parseFloat(form.budget_initial)||0,
+      montant_global:parseFloat(form.montant_global)||null,
+      date_debut:form.date_debut||null, date_fin:form.date_fin||null,
       description:form.description||null,
-      statut:"Brouillon"
     }).then(r=>{
       setSaving(false);
       if(r.error){alert("Erreur: "+JSON.stringify(r.error));return;}
-      setShowNew(false);
-      setForm({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",date_debut:"",date_fin:"",description:""});
-      reload();
+      setShowNew(false);setForm(emptyChForm());reload();
     });
   }
-  function del(id){if(!window.confirm("Supprimer ?"))return;sb("chantiers").eq("id",id).del().then(()=>reload());}
+
+  function saveEdit(){
+    if(!form.nom){alert("Le nom est obligatoire");return;}
+    setSaving(true);
+    sb("chantiers").eq("id",editCh.id).update({
+      nom:form.nom, client:form.client||null, localisation:form.localisation||null,
+      type:form.type||null,
+      budget_initial:parseFloat(form.budget_initial)||0,
+      montant_global:parseFloat(form.montant_global)||null,
+      date_debut:form.date_debut||null, date_fin:form.date_fin||null,
+      description:form.description||null,
+    }).then(r=>{
+      setSaving(false);
+      if(r.error){alert("Erreur: "+JSON.stringify(r.error));return;}
+      setEditCh(null);reload();
+    });
+  }
+
+  function openEdit(e,c){
+    e.stopPropagation();
+    setForm({nom:c.nom,client:c.client||"",localisation:c.localisation||"",type:c.type||"Construction",budget_initial:c.budgetInitial||"",montant_global:c.montant_global||"",date_debut:c.date_debut||"",date_fin:c.date_fin||"",description:c.description||""});
+    setEditCh(c);
+  }
+
+  function del(e,id){
+    e.stopPropagation();
+    if(!window.confirm("Supprimer ce chantier ?"))return;
+    sb("chantiers").eq("id",id).del().then(()=>reload());
+  }
+
   const filtered=filter==="Tous"?ch:ch.filter(c=>c.statut===filter);
+
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
     <div style={{display:"flex",gap:6,justifyContent:"space-between",flexWrap:"wrap",alignItems:"center"}}>
-      <div style={{display:"flex",gap:4,overflowX:"auto"}}>{["Tous",...STATUTS].map(s=><button key={s} onClick={()=>setFilter(s)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filter===s?T.primary:T.border),background:filter===s?T.primary:"transparent",color:filter===s?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>)}</div>
-      <button onClick={()=>setShowNew(true)} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouveau</button>
+      <div style={{display:"flex",gap:4,overflowX:"auto"}}>
+        {["Tous",...STATUTS].map(s=><button key={s} onClick={()=>setFilter(s)} style={{padding:"5px 10px",borderRadius:20,border:"1px solid "+(filter===s?T.primary:T.border),background:filter===s?T.primary:"transparent",color:filter===s?"#fff":T.muted,cursor:"pointer",fontSize:11,whiteSpace:"nowrap",flexShrink:0}}>{s}</button>)}
+      </div>
+      <button onClick={()=>{setForm(emptyChForm());setShowNew(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouveau</button>
     </div>
+
     <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
-      {filtered.map(c=>{const d=totalDep(c),pp=pct(d,c.budgetInitial);return <div key={c.id} onClick={()=>openCh(c.id)} style={{background:T.card,border:"1px solid "+(pp>100?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:14,cursor:"pointer",position:"relative"}}><button onClick={e=>{e.stopPropagation();del(c.id);}} style={{position:"absolute",top:10,right:10,background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:5,padding:"2px 8px",fontSize:10,cursor:"pointer"}}>✕</button><div style={{marginBottom:8,paddingRight:44}}><div style={{fontWeight:700,fontSize:14}}>{c.nom}</div><div style={{fontSize:11,color:T.muted}}>{c.client} — {c.localisation}</div></div><div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}><Badge label={c.statut} color={stC(c.statut,T)}/><Badge label={c.type} color={T.primary} small/></div><div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:T.muted}}>Budget</span><span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span></div><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success}/><div style={{marginTop:6,fontSize:11,color:T.muted}}>{fmtS(d)} / {fmtS(c.budgetInitial)} XOF</div></div>;})}
+      {filtered.map(c=>{
+        const d=totalDep(c),pp=pct(d,c.budgetInitial);
+        const mg=c.montant_global;
+        return <div key={c.id} onClick={()=>openCh(c.id)} style={{background:T.card,border:"1px solid "+(pp>100?T.danger+"66":T.border),borderRadius:T.borderRadius,padding:14,cursor:"pointer",position:"relative"}}>
+          {/* Actions */}
+          <div style={{position:"absolute",top:10,right:10,display:"flex",gap:4}} onClick={e=>e.stopPropagation()}>
+            <button onClick={e=>openEdit(e,c)} style={{background:T.warning+"22",border:"1px solid "+T.warning+"44",color:T.warning,borderRadius:5,padding:"2px 7px",fontSize:10,cursor:"pointer"}}>✏️</button>
+            <button onClick={e=>del(e,c.id)} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:5,padding:"2px 7px",fontSize:10,cursor:"pointer"}}>✕</button>
+          </div>
+          <div style={{marginBottom:8,paddingRight:70}}>
+            <div style={{fontWeight:700,fontSize:14}}>{c.nom}</div>
+            <div style={{fontSize:11,color:T.muted}}>{c.client||"—"} {c.localisation?"· "+c.localisation:""}</div>
+          </div>
+          <div style={{display:"flex",gap:5,marginBottom:8,flexWrap:"wrap"}}>
+            <Badge label={c.statut} color={stC(c.statut,T)}/>
+            <Badge label={c.type||"—"} color={T.primary} small/>
+          </div>
+          {mg>0&&<div style={{fontSize:11,marginBottom:4,display:"flex",justifyContent:"space-between"}}>
+            <span style={{color:T.muted}}>Montant global</span>
+            <span style={{fontWeight:700,color:T.secondary}}>{fmtS(mg)} XOF</span>
+          </div>}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}>
+            <span style={{color:T.muted}}>Budget / Dépenses</span>
+            <span style={{fontWeight:700,color:pp>100?T.danger:pp>80?T.warning:T.success}}>{pp}%</span>
+          </div>
+          <PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success}/>
+          <div style={{marginTop:6,fontSize:11,color:T.muted}}>{fmtS(d)} / {fmtS(c.budgetInitial)} XOF</div>
+        </div>;
+      })}
     </div>
     {filtered.length===0&&<Empty msg="Aucun chantier" icon="🏗️"/>}
-    {showNew&&<Modal title="Nouveau chantier" onClose={()=>setShowNew(false)} onSave={save} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Nom *" value={form.nom} onChange={v=>up("nom",v)} full T={T}/><FF label="Client" value={form.client} onChange={v=>up("client",v)} T={T}/><FS label="Type" value={form.type} onChange={v=>up("type",v)} options={TYPES_CH} T={T}/><FF label="Localisation" value={form.localisation} onChange={v=>up("localisation",v)} T={T}/><FF label="Budget (XOF) *" type="number" value={form.budget_initial} onChange={v=>up("budget_initial",v)} full T={T}/><FF label="Date début" type="date" value={form.date_debut} onChange={v=>up("date_debut",v)} T={T}/><FF label="Date fin prévue" type="date" value={form.date_fin} onChange={v=>up("date_fin",v)} T={T}/><FF label="Description" value={form.description} onChange={v=>up("description",v)} rows={2} full T={T}/></FG>}</Modal>}
+
+    {/* MODAL NOUVEAU */}
+    {showNew&&<Modal title="Nouveau chantier" onClose={()=>setShowNew(false)} onSave={save} T={T}>
+      {saving?<Spin/>:<ChantierFormFields form={form} up={up} T={T}/>}
+    </Modal>}
+
+    {/* MODAL MODIFIER */}
+    {editCh&&<Modal title={"Modifier — "+editCh.nom} onClose={()=>setEditCh(null)} onSave={saveEdit} T={T}>
+      {saving?<Spin/>:<ChantierFormFields form={form} up={up} T={T}/>}
+    </Modal>}
   </div>;
 }
 
