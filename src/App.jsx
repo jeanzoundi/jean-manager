@@ -402,28 +402,163 @@ function DebourseEditor({sess,taches:rawTaches,ch,reload,T,isMobile,updateCfg,on
 }
 
 // ── INTERVENTIONS ─────────────────────────────────────────────────────────────
-function Interventions({intv,ch,reload,T,isMobile}){
-  const [showNew,setShowNew]=useState(false);const [saving,setSaving]=useState(false);
-  const [form,setForm]=useState({titre:"",type:"Corrective",statut:"En cours",chantier_id:"",responsable:"",date_debut:tod(),date_fin:"",description:""});
-  const up=(k,v)=>setForm(p=>({...p,[k]:v}));
-  function save(){if(!form.titre)return;setSaving(true);sb("interventions").insert({...form,chantier_id:form.chantier_id||null,date_debut:form.date_debut||null,date_fin:form.date_fin||null}).then(()=>{setSaving(false);setShowNew(false);reload();});}
-  function del(id){if(!window.confirm("Supprimer ?"))return;sb("interventions").eq("id",id).del().then(()=>reload());}
-  function changeSt(id,st){sb("interventions").eq("id",id).update({statut:st}).then(()=>reload());}
-  return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{display:"flex",justifyContent:"flex-end"}}><button onClick={()=>setShowNew(true)} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Nouvelle intervention</button></div>
-    {intv.length===0&&<Empty msg="Aucune intervention" icon="🔧"/>}
-    {intv.map(i=>{const chNom=(ch.find(c=>c.id===i.chantier_id)||{}).nom||"";const cout=totalDepI(i);return <div key={i.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"14px 16px"}}>
+function IntervCard({i,ch,reload,T}){
+  const [open,setOpen]=useState(false);
+  const [showDep,setShowDep]=useState(false);
+  const [showEdit,setShowEdit]=useState(false);
+  const [lines,setLines]=useState([newDepLine()]);
+  const [savingDep,setSavingDep]=useState(false);
+  const [form,setForm]=useState({titre:i.titre,type:i.type,statut:i.statut,chantier_id:i.chantier_id||"",responsable:i.responsable||"",date_debut:i.date_debut||"",date_fin:i.date_fin||"",description:i.description||""});
+  const chNom=(ch.find(c=>c.id===i.chantier_id)||{}).nom||"";
+  const cout=totalDepI(i);
+  function changeSt(st){sb("interventions").eq("id",i.id).update({statut:st}).then(()=>reload());}
+  function del(){if(!window.confirm("Supprimer cette intervention ?"))return;sb("intervention_depenses").eq("intervention_id",i.id).del().then(()=>sb("interventions").eq("id",i.id).del().then(()=>reload()));}
+  function upLine(id,k,v){setLines(prev=>prev.map(l=>l.id===id?{...l,[k]:v}:l));}
+  async function saveDeps(){
+    const valid=lines.filter(l=>l.libelle&&l.montant);
+    if(!valid.length)return;
+    setSavingDep(true);
+    for(const l of valid){
+      await sb("intervention_depenses").insert({intervention_id:i.id,libelle:l.libelle,categorie:l.categorie,montant:parseFloat(l.montant),date:l.date,note:l.note||""});
+    }
+    setSavingDep(false);setShowDep(false);setLines([newDepLine()]);reload();
+  }
+  function delDep(id){sb("intervention_depenses").eq("id",id).del().then(()=>reload());}
+  function saveEdit(){
+    sb("interventions").eq("id",i.id).update({titre:form.titre,type:form.type,statut:form.statut,chantier_id:form.chantier_id||null,responsable:form.responsable||null,date_debut:form.date_debut||null,date_fin:form.date_fin||null,description:form.description||null})
+    .then(()=>{setShowEdit(false);reload();});
+  }
+  const totalS=lines.reduce((a,l)=>a+(parseFloat(l.montant)||0),0);
+  const iS={background:"#1C1917",border:"1px solid #57534E",borderRadius:5,padding:"6px 8px",color:"#FAFAF9",fontSize:12,outline:"none",width:"100%"};
+  return <div style={{background:T.card,border:"1px solid "+(i.statut==="En derive"?T.danger+"66":T.border),borderRadius:T.borderRadius}}>
+    {/* EN-TÊTE */}
+    <div style={{padding:"14px 16px"}}>
       <div style={{display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginBottom:8}}>
-        <div><div style={{fontWeight:700,fontSize:14}}>{i.titre}</div><div style={{fontSize:11,color:T.muted}}>{chNom&&"🏗 "+chNom} {i.responsable&&"· 👷 "+i.responsable}</div></div>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-          {STATUTS_INT.map(st=><button key={st} onClick={()=>changeSt(i.id,st)} style={{padding:"3px 8px",borderRadius:20,border:"1px solid "+(i.statut===st?intStC(st,T):T.border),background:i.statut===st?intStC(st,T)+"22":"transparent",color:i.statut===st?intStC(st,T):T.muted,cursor:"pointer",fontSize:10}}>{st}</button>)}
-          <button onClick={()=>del(i.id)} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>✕</button>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:14}}>{i.titre}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:2}}>
+            {chNom&&<span>🏗 {chNom} </span>}{i.responsable&&<span>· 👷 {i.responsable} </span>}{i.date_debut&&<span>· 📅 {i.date_debut}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",alignItems:"center"}}>
+          {STATUTS_INT.map(st=><button key={st} onClick={()=>changeSt(st)} style={{padding:"3px 8px",borderRadius:20,border:"1px solid "+(i.statut===st?intStC(st,T):T.border),background:i.statut===st?intStC(st,T)+"33":"transparent",color:i.statut===st?intStC(st,T):T.muted,cursor:"pointer",fontSize:10,fontWeight:i.statut===st?700:400}}>{st}</button>)}
         </div>
       </div>
-      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Badge label={i.type} color={T.warning} small/><Badge label={i.statut} color={intStC(i.statut,T)} small/>{cout>0&&<Badge label={fmt(cout)} color={T.primary} small/>}{i.date_debut&&<span style={{fontSize:10,color:T.muted}}>{i.date_debut}</span>}</div>
-      {i.description&&<div style={{marginTop:8,fontSize:11,color:T.muted}}>{i.description}</div>}
-    </div>;})}
-    {showNew&&<Modal title="Nouvelle intervention" onClose={()=>setShowNew(false)} onSave={save} T={T}>{saving?<Spin/>:<FG cols={2}><FF label="Titre *" value={form.titre} onChange={v=>up("titre",v)} full T={T}/><FS label="Type" value={form.type} onChange={v=>up("type",v)} options={TYPES_INT} T={T}/><FS label="Statut" value={form.statut} onChange={v=>up("statut",v)} options={STATUTS_INT} T={T}/><FS label="Chantier lié" value={form.chantier_id} onChange={v=>up("chantier_id",v)} options={[["","— Aucun —"],...ch.map(c=>[c.id,c.nom])]} T={T}/><FF label="Responsable" value={form.responsable} onChange={v=>up("responsable",v)} T={T}/><FF label="Date début" type="date" value={form.date_debut} onChange={v=>up("date_debut",v)} T={T}/><FF label="Date fin" type="date" value={form.date_fin} onChange={v=>up("date_fin",v)} T={T}/><FF label="Description" value={form.description} onChange={v=>up("description",v)} rows={2} full T={T}/></FG>}</Modal>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          <Badge label={i.type} color={T.warning} small/>
+          <Badge label={i.statut} color={intStC(i.statut,T)} small/>
+          {cout>0&&<Badge label={fmt(cout)} color={T.primary} small/>}
+          <Badge label={(i.depenses||[]).length+" dépense(s)"} color={T.muted} small/>
+        </div>
+        <div style={{display:"flex",gap:5}}>
+          <button onClick={()=>setOpen(p=>!p)} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontWeight:600}}>{open?"▲ Réduire":"▼ Détails"}</button>
+          <button onClick={()=>setShowEdit(true)} style={{background:T.warning+"22",color:T.warning,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>✏️</button>
+          <button onClick={del} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:6,padding:"4px 8px",fontSize:11,cursor:"pointer"}}>🗑</button>
+        </div>
+      </div>
+    </div>
+    {/* DÉTAILS DÉPLIABLES */}
+    {open&&<div style={{borderTop:"1px solid "+T.border,padding:"12px 16px"}}>
+      {i.description&&<div style={{fontSize:12,color:T.muted,marginBottom:10,fontStyle:"italic"}}>{i.description}</div>}
+      {i.date_fin&&<div style={{fontSize:11,color:T.muted,marginBottom:8}}>Date fin : {i.date_fin}</div>}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontWeight:700,fontSize:12}}>Dépenses ({(i.depenses||[]).length})</div>
+        <button onClick={()=>{setLines([newDepLine()]);setShowDep(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>+ Ajouter dépenses</button>
+      </div>
+      {(i.depenses||[]).length===0&&<div style={{textAlign:"center",padding:"12px",color:T.muted,fontSize:12}}>Aucune dépense enregistrée</div>}
+      {(i.depenses||[]).map(d=><div key={d.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid "+T.border+"33"}}>
+        <div><div style={{fontWeight:600,fontSize:12}}>{d.libelle}</div><div style={{display:"flex",gap:5,marginTop:2}}><Badge label={d.categorie} color={catC(d.categorie,T)} small/><span style={{fontSize:10,color:T.muted}}>{d.date}</span>{d.note&&<span style={{fontSize:10,color:T.muted}}>— {d.note}</span>}</div></div>
+        <div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{fontWeight:800,color:T.primary,fontSize:13}}>{fmt(d.montant)}</span><button onClick={()=>delDep(d.id)} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button></div>
+      </div>)}
+      {cout>0&&<div style={{display:"flex",justifyContent:"flex-end",marginTop:8}}><span style={{fontWeight:800,color:T.success,fontSize:13}}>Total : {fmt(cout)}</span></div>}
+    </div>}
+    {/* MODAL DÉPENSES */}
+    {showDep&&<Modal title="Ajouter des dépenses" onClose={()=>setShowDep(false)} onSave={saveDeps} saveLabel={"Enregistrer "+lines.filter(l=>l.libelle&&l.montant).length+" ligne(s)"} T={T} wide>
+      {savingDep?<Spin/>:<>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}><thead><tr style={{background:T.mid}}>{["Libellé *","Catégorie","Montant *","Date","Note",""].map((h,idx)=><th key={idx} style={{padding:"7px 8px",textAlign:"left",fontSize:10,color:T.muted,fontWeight:600}}>{h}</th>)}</tr></thead>
+        <tbody>{lines.map(l=><tr key={l.id} style={{borderBottom:"1px solid "+T.border+"44"}}>
+          <td style={{padding:"4px"}}><input value={l.libelle} onChange={e=>upLine(l.id,"libelle",e.target.value)} placeholder="ex: Pièce de rechange" style={iS}/></td>
+          <td style={{padding:"4px"}}><select value={l.categorie} onChange={e=>upLine(l.id,"categorie",e.target.value)} style={iS}>{CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></td>
+          <td style={{padding:"4px"}}><input type="number" value={l.montant} onChange={e=>upLine(l.id,"montant",e.target.value)} style={{...iS,width:110}}/></td>
+          <td style={{padding:"4px"}}><input type="date" value={l.date} onChange={e=>upLine(l.id,"date",e.target.value)} style={{...iS,width:130}}/></td>
+          <td style={{padding:"4px"}}><input value={l.note} onChange={e=>upLine(l.id,"note",e.target.value)} style={iS}/></td>
+          <td style={{padding:"4px"}}><button onClick={()=>setLines(p=>p.length>1?p.filter(x=>x.id!==l.id):p)} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:5,padding:"5px 8px",cursor:"pointer"}}>✕</button></td>
+        </tr>)}</tbody></table></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+          <button onClick={()=>setLines(p=>[...p,newDepLine()])} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Ligne</button>
+          {totalS>0&&<div style={{fontWeight:700,color:T.primary,fontSize:13}}>Total : {fmt(totalS)}</div>}
+        </div>
+      </>}
+    </Modal>}
+    {/* MODAL MODIFIER */}
+    {showEdit&&<Modal title="Modifier l'intervention" onClose={()=>setShowEdit(false)} onSave={saveEdit} T={T}>
+      <FG cols={2}>
+        <FF label="Titre *" value={form.titre} onChange={v=>setForm(p=>({...p,titre:v}))} full T={T}/>
+        <FS label="Type" value={form.type} onChange={v=>setForm(p=>({...p,type:v}))} options={TYPES_INT} T={T}/>
+        <FS label="Statut" value={form.statut} onChange={v=>setForm(p=>({...p,statut:v}))} options={STATUTS_INT} T={T}/>
+        <FS label="Chantier lié" value={form.chantier_id} onChange={v=>setForm(p=>({...p,chantier_id:v}))} options={[["","— Aucun —"],...ch.map(c=>[c.id,c.nom])]} T={T}/>
+        <FF label="Responsable" value={form.responsable} onChange={v=>setForm(p=>({...p,responsable:v}))} T={T}/>
+        <FF label="Date début" type="date" value={form.date_debut} onChange={v=>setForm(p=>({...p,date_debut:v}))} T={T}/>
+        <FF label="Date fin" type="date" value={form.date_fin} onChange={v=>setForm(p=>({...p,date_fin:v}))} T={T}/>
+        <FF label="Description" value={form.description} onChange={v=>setForm(p=>({...p,description:v}))} rows={2} full T={T}/>
+      </FG>
+    </Modal>}
+  </div>;
+}
+
+function Interventions({intv,ch,reload,T,isMobile}){
+  const [showNew,setShowNew]=useState(false);const [saving,setSaving]=useState(false);
+  const [fStatut,setFStatut]=useState("");const [fType,setFType]=useState("");
+  const [form,setForm]=useState({titre:"",type:"Corrective",statut:"En cours",chantier_id:"",responsable:"",date_debut:tod(),date_fin:"",description:""});
+  const up=(k,v)=>setForm(p=>({...p,[k]:v}));
+  function save(){
+    if(!form.titre){alert("Le titre est obligatoire");return;}
+    setSaving(true);
+    sb("interventions").insert({titre:form.titre,type:form.type,statut:form.statut,chantier_id:form.chantier_id||null,responsable:form.responsable||null,date_debut:form.date_debut||null,date_fin:form.date_fin||null,description:form.description||null})
+    .then(r=>{setSaving(false);if(r.error){alert("Erreur: "+JSON.stringify(r.error));return;}setShowNew(false);setForm({titre:"",type:"Corrective",statut:"En cours",chantier_id:"",responsable:"",date_debut:tod(),date_fin:"",description:""});reload();});
+  }
+  const filtered=intv.filter(i=>{if(fStatut&&i.statut!==fStatut)return false;if(fType&&i.type!==fType)return false;return true;});
+  const enCours=intv.filter(i=>i.statut==="En cours").length;
+  const termines=intv.filter(i=>i.statut==="Termine").length;
+  const totalCout=intv.reduce((a,i)=>a+totalDepI(i),0);
+  return <div style={{display:"flex",flexDirection:"column",gap:14}}>
+    {/* KPIs */}
+    <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:8}}>
+      <Kpi icon="🔧" label="Total" value={intv.length} color={T.secondary} compact T={T}/>
+      <Kpi icon="▶️" label="En cours" value={enCours} color={T.secondary} compact T={T}/>
+      <Kpi icon="✅" label="Terminées" value={termines} color={T.success} compact T={T}/>
+      <Kpi icon="💸" label="Coût total" value={fmtS(totalCout)} color={T.warning} compact T={T}/>
+    </div>
+    {/* FILTRES + BOUTON */}
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <select value={fStatut} onChange={e=>setFStatut(e.target.value)} style={{background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"6px 10px",color:T.white,fontSize:12,outline:"none"}}>
+          <option value="">Tous statuts</option>{STATUTS_INT.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
+        <select value={fType} onChange={e=>setFType(e.target.value)} style={{background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"6px 10px",color:T.white,fontSize:12,outline:"none"}}>
+          <option value="">Tous types</option>{TYPES_INT.map(s=><option key={s} value={s}>{s}</option>)}
+        </select>
+        {(fStatut||fType)&&<button onClick={()=>{setFStatut("");setFType("");}} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11,cursor:"pointer",fontWeight:700}}>✕ Reset</button>}
+      </div>
+      <button onClick={()=>setShowNew(true)} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"8px 16px",fontWeight:700,cursor:"pointer",fontSize:13}}>+ Nouvelle intervention</button>
+    </div>
+    {/* LISTE */}
+    {filtered.length===0&&<Empty msg="Aucune intervention" icon="🔧"/>}
+    {filtered.map(i=><IntervCard key={i.id} i={i} ch={ch} reload={reload} T={T}/>)}
+    {/* MODAL NOUVELLE */}
+    {showNew&&<Modal title="Nouvelle intervention" onClose={()=>setShowNew(false)} onSave={save} T={T}>
+      {saving?<Spin/>:<FG cols={2}>
+        <FF label="Titre *" value={form.titre} onChange={v=>up("titre",v)} full T={T}/>
+        <FS label="Type" value={form.type} onChange={v=>up("type",v)} options={TYPES_INT} T={T}/>
+        <FS label="Statut" value={form.statut} onChange={v=>up("statut",v)} options={STATUTS_INT} T={T}/>
+        <FS label="Chantier lié" value={form.chantier_id} onChange={v=>up("chantier_id",v)} options={[["","— Aucun —"],...ch.map(c=>[c.id,c.nom])]} T={T}/>
+        <FF label="Responsable" value={form.responsable} onChange={v=>up("responsable",v)} T={T}/>
+        <FF label="Date début" type="date" value={form.date_debut} onChange={v=>up("date_debut",v)} T={T}/>
+        <FF label="Date fin" type="date" value={form.date_fin} onChange={v=>up("date_fin",v)} T={T}/>
+        <FF label="Description" value={form.description} onChange={v=>up("description",v)} rows={2} full T={T}/>
+      </FG>}
+    </Modal>}
   </div>;
 }
 
