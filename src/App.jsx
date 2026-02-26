@@ -214,6 +214,22 @@ function Dashboard({ch,intv,openCh,T,isMobile,navTo}){
   </div>;
 }
 
+// ── STATUT PICKER ─────────────────────────────────────────────────────────────
+function StatutPicker({statut,onChange,T}){
+  const [open,setOpen]=useState(false);
+  return <div style={{position:"relative"}}>
+    <button onClick={e=>{e.stopPropagation();setOpen(p=>!p);}} style={{background:stC(statut,T)+"33",border:"1px solid "+stC(statut,T)+"66",color:stC(statut,T),borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+      {statut} ▾
+    </button>
+    {open&&<div style={{position:"absolute",right:0,bottom:"110%",background:DT.card,border:"1px solid "+DT.border,borderRadius:10,padding:"6px",zIndex:99,minWidth:150,boxShadow:"0 4px 20px #0008"}}>
+      {STATUTS.map(s=><button key={s} onClick={e=>{e.stopPropagation();onChange(s);setOpen(false);}} style={{display:"block",width:"100%",textAlign:"left",padding:"7px 12px",background:statut===s?stC(s,DT)+"22":"transparent",border:"none",borderRadius:7,color:stC(s,DT),fontSize:12,fontWeight:statut===s?700:400,cursor:"pointer",marginBottom:2}}>
+        <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:stC(s,DT),marginRight:7}}/>
+        {s}
+      </button>)}
+    </div>}
+  </div>;
+}
+
 // ── CHANTIERS ─────────────────────────────────────────────────────────────────
 const emptyChForm=()=>({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",montant_global:"",date_debut:"",date_fin:"",description:""});
 
@@ -305,6 +321,10 @@ function Chantiers({ch,openCh,reload,T,isMobile}){
             <button onClick={e=>openEdit(e,c)} style={{background:T.warning+"22",border:"1px solid "+T.warning+"44",color:T.warning,borderRadius:5,padding:"2px 7px",fontSize:10,cursor:"pointer"}}>✏️</button>
             <button onClick={e=>del(e,c.id)} style={{background:T.danger+"22",border:"1px solid "+T.danger+"44",color:T.danger,borderRadius:5,padding:"2px 7px",fontSize:10,cursor:"pointer"}}>✕</button>
           </div>
+          {/* Sélecteur statut rapide */}
+          <div style={{position:"absolute",bottom:10,right:10}} onClick={e=>e.stopPropagation()}>
+            <StatutPicker statut={c.statut} onChange={st=>{sb("chantiers").eq("id",c.id).update({statut:st}).then(()=>reload());}} T={T}/>
+          </div>
           <div style={{marginBottom:8,paddingRight:70}}>
             <div style={{fontWeight:700,fontSize:14}}>{c.nom}</div>
             <div style={{fontSize:11,color:T.muted}}>{c.client||"—"} {c.localisation?"· "+c.localisation:""}</div>
@@ -359,7 +379,13 @@ function Fiche({chantier:c,setPage,reload,T,isMobile}){
   return <div style={{display:"flex",flexDirection:"column",gap:0}}>
     <button onClick={()=>setPage("chantiers")} style={{background:"none",border:"none",color:T.primary,cursor:"pointer",fontSize:13,marginBottom:10,textAlign:"left",padding:0}}>← Retour</button>
     <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:isMobile?14:18,marginBottom:12}}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:10}}><div style={{flex:1}}><div style={{fontSize:isMobile?16:20,fontWeight:800}}>{c.nom}</div><div style={{color:T.muted,fontSize:11}}>{c.client} — {c.localisation}</div></div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{STATUTS.map(st=><button key={st} onClick={()=>changeSt(st)} style={{padding:"4px 8px",borderRadius:20,border:"1px solid "+(c.statut===st?stC(st,T):T.border),background:c.statut===st?stC(st,T)+"22":"transparent",color:c.statut===st?stC(st,T):T.muted,cursor:"pointer",fontSize:10}}>{st}</button>)}</div></div>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,flexWrap:"wrap",marginBottom:10}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:isMobile?16:20,fontWeight:800}}>{c.nom}</div>
+          <div style={{color:T.muted,fontSize:11}}>{c.client} — {c.localisation}</div>
+        </div>
+        <StatutPicker statut={c.statut} onChange={st=>changeSt(st)} T={T}/>
+      </div>
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}><Badge label={c.statut} color={stC(c.statut,T)}/><button onClick={exportFiche} style={expBtn(T.success)}>📥 CSV</button><button onClick={printFiche} style={expBtn(T.primary)}>🖨️ PDF</button></div>
     </div>
     <div style={{display:"flex",gap:4,marginBottom:12}}>{[["infos","Infos"],["depenses","Dépenses ("+c.depenses.length+")"]].map(o=><button key={o[0]} onClick={()=>setTab(o[0])} style={{padding:"7px 12px",borderRadius:8,border:"1px solid "+(tab===o[0]?T.primary:T.border),background:tab===o[0]?T.primary:T.card,color:tab===o[0]?"#fff":T.muted,cursor:"pointer",fontSize:12,fontWeight:tab===o[0]?700:400}}>{o[1]}</button>)}</div>
