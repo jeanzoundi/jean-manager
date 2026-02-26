@@ -219,7 +219,28 @@ function Chantiers({ch,openCh,reload,T,isMobile}){
   const [filter,setFilter]=useState("Tous");const [showNew,setShowNew]=useState(false);const [saving,setSaving]=useState(false);
   const [form,setForm]=useState({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",date_debut:"",date_fin:"",description:""});
   const up=(k,v)=>setForm(p=>({...p,[k]:v}));
-  function save(){if(!form.nom||!form.budget_initial)return;setSaving(true);sb("chantiers").insert({...form,budget_initial:parseFloat(form.budget_initial),date_debut:form.date_debut||null,date_fin:form.date_fin||null,statut:"Brouillon"}).then(()=>{setSaving(false);setShowNew(false);reload();});}
+  function save(){
+    if(!form.nom){alert("Le nom est obligatoire");return;}
+    if(!form.budget_initial){alert("Le budget est obligatoire");return;}
+    setSaving(true);
+    sb("chantiers").insert({
+      nom:form.nom,
+      client:form.client||null,
+      localisation:form.localisation||null,
+      type:form.type||null,
+      budget_initial:parseFloat(form.budget_initial),
+      date_debut:form.date_debut||null,
+      date_fin:form.date_fin||null,
+      description:form.description||null,
+      statut:"Brouillon"
+    }).then(r=>{
+      setSaving(false);
+      if(r.error){alert("Erreur: "+JSON.stringify(r.error));return;}
+      setShowNew(false);
+      setForm({nom:"",client:"",localisation:"",type:"Construction",budget_initial:"",date_debut:"",date_fin:"",description:""});
+      reload();
+    });
+  }
   function del(id){if(!window.confirm("Supprimer ?"))return;sb("chantiers").eq("id",id).del().then(()=>reload());}
   const filtered=filter==="Tous"?ch:ch.filter(c=>c.statut===filter);
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
