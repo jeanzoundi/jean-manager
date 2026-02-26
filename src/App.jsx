@@ -217,16 +217,24 @@ function Dashboard({ch,intv,openCh,T,isMobile,navTo}){
 // ── STATUT PICKER ─────────────────────────────────────────────────────────────
 function StatutPicker({statut,onChange,T}){
   const [open,setOpen]=useState(false);
-  return <div style={{position:"relative"}}>
-    <button onClick={e=>{e.stopPropagation();setOpen(p=>!p);}} style={{background:stC(statut,T)+"33",border:"1px solid "+stC(statut,T)+"66",color:stC(statut,T),borderRadius:20,padding:"3px 10px",fontSize:10,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap"}}>
+  const ref=useState(null);
+  useEffect(()=>{if(!open)return;const fn=()=>setOpen(false);document.addEventListener("click",fn);return()=>document.removeEventListener("click",fn);},[open]);
+  return <div style={{position:"relative",display:"inline-block"}}>
+    <button onClick={e=>{e.stopPropagation();setOpen(p=>!p);}} style={{background:stC(statut,T)+"33",border:"1px solid "+stC(statut,T)+"77",color:stC(statut,T),borderRadius:20,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}>
+      <span style={{width:7,height:7,borderRadius:"50%",background:stC(statut,T),display:"inline-block",flexShrink:0}}/>
       {statut} ▾
     </button>
-    {open&&<div style={{position:"absolute",right:0,bottom:"110%",background:DT.card,border:"1px solid "+DT.border,borderRadius:10,padding:"6px",zIndex:99,minWidth:150,boxShadow:"0 4px 20px #0008"}}>
-      {STATUTS.map(s=><button key={s} onClick={e=>{e.stopPropagation();onChange(s);setOpen(false);}} style={{display:"block",width:"100%",textAlign:"left",padding:"7px 12px",background:statut===s?stC(s,DT)+"22":"transparent",border:"none",borderRadius:7,color:stC(s,DT),fontSize:12,fontWeight:statut===s?700:400,cursor:"pointer",marginBottom:2}}>
-        <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:stC(s,DT),marginRight:7}}/>
-        {s}
-      </button>)}
-    </div>}
+    {open&&<>
+      <div onClick={e=>e.stopPropagation()} style={{position:"fixed",inset:0,zIndex:998}} />
+      <div onClick={e=>e.stopPropagation()} style={{position:"fixed",zIndex:999,background:DT.card,border:"1px solid "+DT.border,borderRadius:12,padding:"6px",minWidth:170,boxShadow:"0 8px 32px #000a",transform:"translateX(-50%)",left:"50%",top:"50%",marginTop:-100}}>
+        <div style={{fontSize:10,color:DT.muted,padding:"4px 10px 8px",fontWeight:600,borderBottom:"1px solid "+DT.border,marginBottom:4}}>Changer le statut</div>
+        {STATUTS.map(s=><button key={s} onClick={e=>{e.stopPropagation();onChange(s);setOpen(false);}} style={{display:"flex",alignItems:"center",gap:8,width:"100%",textAlign:"left",padding:"8px 12px",background:statut===s?stC(s,DT)+"22":"transparent",border:"none",borderRadius:8,color:statut===s?stC(s,DT):DT.white,fontSize:12,fontWeight:statut===s?700:400,cursor:"pointer",marginBottom:2}}>
+          <span style={{width:9,height:9,borderRadius:"50%",background:stC(s,DT),flexShrink:0}}/>
+          {s}
+          {statut===s&&<span style={{marginLeft:"auto",fontSize:10}}>✓</span>}
+        </button>)}
+      </div>
+    </>}
   </div>;
 }
 
