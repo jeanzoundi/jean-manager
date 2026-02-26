@@ -515,7 +515,7 @@ function Interventions({intv,ch,reload,T,isMobile}){
   function save(){
     if(!form.titre){alert("Le titre est obligatoire");return;}
     setSaving(true);
-    sb("interventions").insert({titre:form.titre,type:form.type,statut:form.statut,chantier_id:form.chantier_id||null,responsable:form.responsable||null,date_debut:form.date_debut||null,date_fin:form.date_fin||null,description:form.description||null})
+    sb("interventions").insert({titre:form.titre,type:form.type,statut:form.statut,chantier_id:form.chantier_id||null,responsable:form.responsable||null,date_debut:form.date_debut||null,date_fin:form.date_fin||null,description:form.description||null,date_creation:tod()})
     .then(r=>{setSaving(false);if(r.error){alert("Erreur: "+JSON.stringify(r.error));return;}setShowNew(false);setForm({titre:"",type:"Corrective",statut:"En cours",chantier_id:"",responsable:"",date_debut:tod(),date_fin:"",description:""});reload();});
   }
   const filtered=intv.filter(i=>{if(fStatut&&i.statut!==fStatut)return false;if(fType&&i.type!==fType)return false;return true;});
