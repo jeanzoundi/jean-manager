@@ -91,7 +91,8 @@ function Modal({T,title,onClose,onSave,saveLabel,children,wide}){return <div sty
 function FF({T,label,value,onChange,type,placeholder,rows,full}){const s={width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"8px 10px",color:T.white,fontSize:13,boxSizing:"border-box",outline:"none"};return <div style={full?{gridColumn:"1/-1"}:{}}>{label&&<label style={{fontSize:10,color:T.muted,display:"block",marginBottom:3}}>{label}</label>}{rows?<textarea value={value||""} onChange={e=>onChange(e.target.value)} rows={rows} style={s} placeholder={placeholder}/>:<input type={type||"text"} value={value||""} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={s}/>}</div>;}
 function FS({T,label,value,onChange,options,full}){return <div style={full?{gridColumn:"1/-1"}:{}}>{label&&<label style={{fontSize:10,color:T.muted,display:"block",marginBottom:3}}>{label}</label>}<select value={value||""} onChange={e=>onChange(e.target.value)} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"8px 10px",color:T.white,fontSize:13,boxSizing:"border-box",outline:"none"}}>{options.map(o=>Array.isArray(o)?<option key={o[0]} value={o[0]}>{o[1]}</option>:<option key={o} value={o}>{o}</option>)}</select></div>;}
 function FG({cols=2,children}){return <div style={{display:"grid",gridTemplateColumns:`repeat(${cols},1fr)`,gap:10}}>{children}</div>;}
-function newDepLine(){return {id:uid(),libelle:"",categorie:"Main d'oeuvre",montant:"",date:tod(),note:""};}
+function newDepLine(){return {id:uid(),libelle:"",categorie:"Main d'oeuvre",quantite:"1",prix_unitaire:"",montant:"",date:tod(),note:""};}
+function calcMontant(q,pu){const r=parseFloat(q||1)*parseFloat(pu||0);return isNaN(r)?0:r;}
 function ISel({T,label,value,onChange,style={}}){return <div style={style}>{label&&<label style={{fontSize:10,color:T.muted,display:"block",marginBottom:3}}>{label}</label>}<input value={value||""} onChange={e=>onChange(e.target.value)} style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"7px 10px",color:T.white,fontSize:12,outline:"none"}}/></div>;}
 function expBtn(color){return {background:color+"22",color:color,border:"1px solid "+color+"44",borderRadius:8,padding:"8px 14px",fontWeight:700,cursor:"pointer",fontSize:12};}
 
@@ -373,8 +374,8 @@ function Fiche({chantier:c,setPage,reload,T,isMobile}){
   const [tab,setTab]=useState("infos");const [showDep,setShowDep]=useState(false);const [lines,setLines]=useState([newDepLine()]);const [saving,setSaving]=useState(false);
   const dep=totalDep(c),dp=pct(dep,c.budgetInitial);
   function changeSt(st){sb("chantiers").eq("id",c.id).update({statut:st}).then(()=>reload());}
-  function upLine(id,k,v){setLines(prev=>prev.map(l=>l.id===id?{...l,[k]:v}:l));}
-  async function saveDeps(){const valid=lines.filter(l=>l.libelle&&l.montant);if(!valid.length)return;setSaving(true);for(const l of valid)await sb("depenses").insert({chantier_id:c.id,libelle:l.libelle,categorie:l.categorie,montant:parseFloat(l.montant),date:l.date,note:l.note});setSaving(false);setShowDep(false);setLines([newDepLine()]);reload();}
+  function upLine(id,k,v){setLines(prev=>prev.map(l=>{const u={...l,[k]:v};if(k==="quantite"||k==="prix_unitaire"){u.montant=String(calcMontant(k==="quantite"?v:l.quantite,k==="prix_unitaire"?v:l.prix_unitaire));}return l.id===id?u:l;}));}
+  async function saveDeps(){const valid=lines.filter(l=>l.libelle&&(l.montant||l.prix_unitaire));if(!valid.length)return;setSaving(true);for(const l of valid){const montant=parseFloat(l.montant)||calcMontant(l.quantite,l.prix_unitaire);await sb("depenses").insert({chantier_id:c.id,libelle:l.libelle,categorie:l.categorie,quantite:parseFloat(l.quantite)||1,prix_unitaire:parseFloat(l.prix_unitaire)||0,montant,date:l.date,note:l.note});}setSaving(false);setShowDep(false);setLines([newDepLine()]);reload();}
   function delDep(id){sb("depenses").eq("id",id).del().then(()=>reload());}
   const totalS=lines.reduce((a,l)=>a+(parseFloat(l.montant)||0),0);
   function exportFiche(){const rows=(c.depenses||[]).map(d=>({Libellé:d.libelle,Catégorie:d.categorie,"Montant (XOF)":d.montant,Date:d.date,Note:d.note||""}));if(rows.length)exportCSV(rows,"depenses_"+c.nom+"_"+tod());}
@@ -404,10 +405,37 @@ function Fiche({chantier:c,setPage,reload,T,isMobile}){
     {tab==="depenses"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
       <div style={{display:"flex",justifyContent:"flex-end",gap:6}}><button onClick={exportFiche} style={expBtn(T.success)}>📥 CSV dépenses</button><button onClick={()=>{setLines([newDepLine()]);setShowDep(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Saisie multi-lignes</button></div>
       {c.depenses.length===0&&<Empty msg="Aucune dépense" icon="🧾"/>}
-      {c.depenses.map(d=><div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:9,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}><div style={{flex:1}}><div style={{fontWeight:700,fontSize:13}}>{d.libelle}</div><div style={{display:"flex",gap:6,marginTop:4}}><Badge label={d.categorie} color={catC(d.categorie,T)} small/><span style={{fontSize:10,color:T.muted}}>{d.date}</span>{d.note&&<span style={{fontSize:10,color:T.muted}}>{d.note}</span>}</div></div><div style={{display:"flex",gap:5,alignItems:"center"}}><span style={{fontWeight:800,color:T.primary,fontSize:13}}>{fmt(d.montant)}</span><button onClick={()=>delDep(d.id)} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button></div></div>)}
+      {c.depenses.map(d=><div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:9,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:13}}>{d.libelle}</div>
+          <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
+            <Badge label={d.categorie} color={catC(d.categorie,T)} small/>
+            {d.quantite>0&&d.prix_unitaire>0&&<span style={{fontSize:10,color:T.muted}}>{fmtN(d.quantite)} × {fmtN(d.prix_unitaire)} XOF</span>}
+            <span style={{fontSize:10,color:T.muted}}>{d.date}</span>
+            {d.note&&<span style={{fontSize:10,color:T.muted}}>— {d.note}</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontWeight:800,color:T.primary,fontSize:13}}>{fmt(d.montant)}</div>
+            {d.quantite>1&&<div style={{fontSize:9,color:T.muted}}>{fmtN(d.quantite)} unités</div>}
+          </div>
+          <button onClick={()=>delDep(d.id)} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button>
+        </div>
+      </div>)}
       {showDep&&<Modal title="Saisie dépenses multi-lignes" onClose={()=>setShowDep(false)} onSave={saveDeps} saveLabel={"Enregistrer "+lines.filter(l=>l.libelle&&l.montant).length+" ligne(s)"} T={T} wide>
         {saving?<Spin/>:<>
-          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}><thead><tr style={{background:T.mid}}>{["Libellé *","Catégorie","Montant *","Date","Note",""].map((h,i)=><th key={i} style={{padding:"7px 8px",textAlign:"left",fontSize:10,color:T.muted,fontWeight:600}}>{h}</th>)}</tr></thead><tbody>{lines.map(l=>{const iS={background:T.bg,border:"1px solid "+T.border,borderRadius:5,padding:"6px 8px",color:T.white,fontSize:12,outline:"none",width:"100%"};return <tr key={l.id} style={{borderBottom:"1px solid "+T.border+"44"}}><td style={{padding:"4px"}}><input value={l.libelle} onChange={e=>upLine(l.id,"libelle",e.target.value)} placeholder="ex: Béton B25" style={iS}/></td><td style={{padding:"4px"}}><select value={l.categorie} onChange={e=>upLine(l.id,"categorie",e.target.value)} style={iS}>{CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></td><td style={{padding:"4px"}}><input type="number" value={l.montant} onChange={e=>upLine(l.id,"montant",e.target.value)} style={{...iS,width:110}}/></td><td style={{padding:"4px"}}><input type="date" value={l.date} onChange={e=>upLine(l.id,"date",e.target.value)} style={{...iS,width:130}}/></td><td style={{padding:"4px"}}><input value={l.note} onChange={e=>upLine(l.id,"note",e.target.value)} style={iS}/></td><td style={{padding:"4px"}}><button onClick={()=>setLines(p=>p.length>1?p.filter(x=>x.id!==l.id):p)} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:5,padding:"5px 8px",cursor:"pointer"}}>✕</button></td></tr>;})}</tbody></table></div>
+          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}><thead><tr style={{background:T.mid}}>{["Libellé *","Catégorie","Qté","Prix Unit. *","= Montant","Date","Note",""].map((h,i)=><th key={i} style={{padding:"7px 8px",textAlign:"left",fontSize:10,color:T.muted,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{lines.map(l=>{const iS={background:T.bg,border:"1px solid "+T.border,borderRadius:5,padding:"6px 8px",color:T.white,fontSize:12,outline:"none",width:"100%"};const mont=calcMontant(l.quantite,l.prix_unitaire);return <tr key={l.id} style={{borderBottom:"1px solid "+T.border+"44"}}>
+            <td style={{padding:"4px"}}><input value={l.libelle} onChange={e=>upLine(l.id,"libelle",e.target.value)} placeholder="ex: Béton B25" style={iS}/></td>
+            <td style={{padding:"4px"}}><select value={l.categorie} onChange={e=>upLine(l.id,"categorie",e.target.value)} style={iS}>{CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></td>
+            <td style={{padding:"4px"}}><input type="number" value={l.quantite} onChange={e=>upLine(l.id,"quantite",e.target.value)} style={{...iS,width:70}} min="0" placeholder="1"/></td>
+            <td style={{padding:"4px"}}><input type="number" value={l.prix_unitaire} onChange={e=>upLine(l.id,"prix_unitaire",e.target.value)} style={{...iS,width:110}} placeholder="0"/></td>
+            <td style={{padding:"4px 8px",fontWeight:700,color:mont>0?T.success:T.muted,whiteSpace:"nowrap",fontSize:12}}>{mont>0?fmtN(mont)+" XOF":"—"}</td>
+            <td style={{padding:"4px"}}><input type="date" value={l.date} onChange={e=>upLine(l.id,"date",e.target.value)} style={{...iS,width:130}}/></td>
+            <td style={{padding:"4px"}}><input value={l.note} onChange={e=>upLine(l.id,"note",e.target.value)} style={iS}/></td>
+            <td style={{padding:"4px"}}><button onClick={()=>setLines(p=>p.length>1?p.filter(x=>x.id!==l.id):p)} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:5,padding:"5px 8px",cursor:"pointer"}}>✕</button></td>
+          </tr>;})}
+          </tbody></table></div>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}><button onClick={()=>setLines(p=>[...p,newDepLine()])} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Ligne</button>{totalS>0&&<div style={{fontWeight:700,color:T.primary,fontSize:13}}>Total : {fmt(totalS)}</div>}</div>
         </>}
       </Modal>}
