@@ -369,6 +369,205 @@ function Chantiers({ch,openCh,reload,T,isMobile}){
   </div>;
 }
 
+// ── ONGLET DÉPENSES CLASSIFIÉES ───────────────────────────────────────────────
+function DepensesTab({c,T,lines,setLines,showDep,setShowDep,saving,saveDeps,upLine,totalS,exportFiche,delDep}){
+  const [search,setSearch]=useState("");
+  const [filterCat,setFilterCat]=useState("");
+  const [filterMois,setFilterMois]=useState("");
+  const [view,setView]=useState("cat"); // cat | list | chart
+
+  const deps=c.depenses||[];
+
+  // Filtrage
+  const filtered=useMemo(()=>deps.filter(d=>{
+    if(filterCat&&d.categorie!==filterCat)return false;
+    if(filterMois&&getMois(d.date)!==filterMois)return false;
+    if(search&&!d.libelle.toLowerCase().includes(search.toLowerCase()))return false;
+    return true;
+  }),[deps,filterCat,filterMois,search]);
+
+  // Groupement par catégorie
+  const parCat=useMemo(()=>{
+    const m={};
+    filtered.forEach(d=>{
+      const k=d.categorie||"Divers";
+      if(!m[k])m[k]={cat:k,items:[],total:0};
+      m[k].items.push(d);
+      m[k].total+=Number(d.montant||0);
+    });
+    return Object.values(m).sort((a,b)=>b.total-a.total);
+  },[filtered]);
+
+  // Mois disponibles
+  const moisDispo=useMemo(()=>[...new Set(deps.map(d=>getMois(d.date)).filter(Boolean))].sort().reverse(),[deps]);
+
+  const totalFiltre=filtered.reduce((a,d)=>a+Number(d.montant||0),0);
+  const totalGeneral=deps.reduce((a,d)=>a+Number(d.montant||0),0);
+
+  // Données graphique
+  const chartData=parCat.map(g=>({name:g.cat,value:g.total}));
+  const CHART_COLORS=[T.primary,T.secondary,T.success,T.warning,"#A855F7","#EC4899",T.muted];
+
+  const iS={background:T.bg,border:"1px solid "+T.border,borderRadius:5,padding:"6px 8px",color:T.white,fontSize:12,outline:"none",width:"100%"};
+
+  return <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+    {/* BARRE OUTILS */}
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",flex:1}}>
+        {/* Recherche */}
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Rechercher..." style={{...iS,width:160,flex:1,minWidth:120}}/>
+        {/* Filtre catégorie */}
+        <select value={filterCat} onChange={e=>setFilterCat(e.target.value)} style={{...iS,width:"auto"}}>
+          <option value="">Toutes catégories</option>
+          {CATS.map(c=><option key={c} value={c}>{c}</option>)}
+        </select>
+        {/* Filtre mois */}
+        <select value={filterMois} onChange={e=>setFilterMois(e.target.value)} style={{...iS,width:"auto"}}>
+          <option value="">Tous les mois</option>
+          {moisDispo.map(m=><option key={m} value={m}>{getMoisNom(m+"-01")}</option>)}
+        </select>
+        {(search||filterCat||filterMois)&&<button onClick={()=>{setSearch("");setFilterCat("");setFilterMois("");}} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:7,padding:"6px 10px",fontSize:11,cursor:"pointer",fontWeight:700}}>✕</button>}
+      </div>
+      <div style={{display:"flex",gap:5}}>
+        {[["cat","📂"],["list","📋"],["chart","📊"]].map(([v,l])=><button key={v} onClick={()=>setView(v)} style={{background:view===v?T.secondary:T.mid,color:view===v?"#fff":T.muted,border:"none",borderRadius:7,padding:"6px 10px",fontSize:13,cursor:"pointer",fontWeight:view===v?700:400}}>{l}</button>)}
+        <button onClick={exportFiche} style={expBtn(T.success)}>📥 CSV</button>
+        <button onClick={()=>{setLines([newDepLine()]);setShowDep(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Ajouter</button>
+      </div>
+    </div>
+
+    {/* TOTAUX RAPIDES */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8}}>
+      <div style={{background:T.primary+"22",border:"1px solid "+T.primary+"44",borderRadius:9,padding:"10px 12px",textAlign:"center"}}>
+        <div style={{fontSize:9,color:T.muted,marginBottom:2}}>TOTAL GÉNÉRAL</div>
+        <div style={{fontWeight:800,fontSize:14,color:T.primary}}>{fmtS(totalGeneral)} XOF</div>
+      </div>
+      {parCat.map(g=><div key={g.cat} style={{background:catC(g.cat,T)+"22",border:"1px solid "+catC(g.cat,T)+"44",borderRadius:9,padding:"10px 12px",textAlign:"center"}}>
+        <div style={{fontSize:9,color:T.muted,marginBottom:2}}>{g.cat.toUpperCase()}</div>
+        <div style={{fontWeight:800,fontSize:13,color:catC(g.cat,T)}}>{fmtS(g.total)}</div>
+        <div style={{fontSize:9,color:T.muted}}>{g.items.length} poste(s)</div>
+      </div>)}
+    </div>
+
+    {filtered.length===0&&<Empty msg="Aucune dépense trouvée" icon="🧾"/>}
+
+    {/* VUE PAR CATÉGORIE */}
+    {view==="cat"&&filtered.length>0&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {parCat.map(g=>{
+        const pp=pct(g.total,totalGeneral);
+        return <div key={g.cat} style={{background:T.card,border:"1px solid "+catC(g.cat,T)+"55",borderRadius:T.borderRadius,overflow:"hidden"}}>
+          {/* En-tête catégorie */}
+          <div style={{background:catC(g.cat,T)+"22",padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:6}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{width:10,height:10,borderRadius:"50%",background:catC(g.cat,T),display:"inline-block"}}/>
+              <span style={{fontWeight:800,fontSize:13,color:catC(g.cat,T)}}>{g.cat}</span>
+              <span style={{fontSize:11,color:T.muted}}>({g.items.length} poste{g.items.length>1?"s":""})</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:80}}><PBar p={pp} color={catC(g.cat,T)} h={5}/></div>
+              <span style={{fontSize:10,color:T.muted}}>{pp}%</span>
+              <span style={{fontWeight:800,fontSize:13,color:catC(g.cat,T)}}>{fmt(g.total)}</span>
+            </div>
+          </div>
+          {/* Lignes */}
+          {g.items.map((d,i)=><div key={d.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 14px",borderTop:"1px solid "+T.border+"33",gap:8}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:600,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.libelle}</div>
+              <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap"}}>
+                {d.quantite>0&&d.prix_unitaire>0&&<span style={{fontSize:10,color:T.muted}}>{fmtN(d.quantite)} × {fmtN(d.prix_unitaire)} XOF</span>}
+                <span style={{fontSize:10,color:T.muted}}>{d.date}</span>
+                {d.note&&<span style={{fontSize:10,color:T.muted,fontStyle:"italic"}}>— {d.note}</span>}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexShrink:0}}>
+              <span style={{fontWeight:800,color:T.white,fontSize:13}}>{fmt(d.montant)}</span>
+              <button onClick={()=>delDep(d.id)} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button>
+            </div>
+          </div>)}
+          {/* Sous-total */}
+          <div style={{background:catC(g.cat,T)+"11",padding:"7px 14px",display:"flex",justifyContent:"flex-end"}}>
+            <span style={{fontSize:11,color:T.muted,marginRight:8}}>Sous-total {g.cat} :</span>
+            <span style={{fontWeight:800,fontSize:12,color:catC(g.cat,T)}}>{fmt(g.total)}</span>
+          </div>
+        </div>;
+      })}
+    </div>}
+
+    {/* VUE LISTE */}
+    {view==="list"&&filtered.length>0&&<div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,overflow:"hidden"}}>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:600}}>
+        <thead><tr style={{background:T.mid}}>{["Libellé","Catégorie","Qté","PU","Montant","Date","Note",""].map((h,i)=><th key={i} style={{padding:"8px 10px",textAlign:i>3?"right":"left",fontSize:10,color:T.muted,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+        <tbody>{filtered.map(d=><tr key={d.id} style={{borderBottom:"1px solid "+T.border+"33"}}>
+          <td style={{padding:"8px 10px",fontWeight:600,fontSize:12}}>{d.libelle}</td>
+          <td style={{padding:"8px 10px"}}><Badge label={d.categorie} color={catC(d.categorie,T)} small/></td>
+          <td style={{padding:"8px 10px",textAlign:"right",fontSize:11,color:T.muted}}>{fmtN(d.quantite)||1}</td>
+          <td style={{padding:"8px 10px",textAlign:"right",fontSize:11,color:T.muted}}>{d.prix_unitaire>0?fmtN(d.prix_unitaire):"—"}</td>
+          <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:T.primary}}>{fmt(d.montant)}</td>
+          <td style={{padding:"8px 10px",textAlign:"right",fontSize:11,color:T.muted}}>{d.date}</td>
+          <td style={{padding:"8px 10px",fontSize:11,color:T.muted,fontStyle:"italic"}}>{d.note||"—"}</td>
+          <td style={{padding:"8px 10px"}}><button onClick={()=>delDep(d.id)} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button></td>
+        </tr>)}
+        <tr style={{background:T.primary+"22",borderTop:"2px solid "+T.primary}}>
+          <td colSpan={4} style={{padding:"8px 10px",fontWeight:800,color:T.primary}}>TOTAL ({filtered.length} poste{filtered.length>1?"s":""})</td>
+          <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:T.primary}}>{fmt(totalFiltre)}</td>
+          <td colSpan={3}/>
+        </tr>
+        </tbody>
+      </table></div>
+    </div>}
+
+    {/* VUE GRAPHIQUE */}
+    {view==="chart"&&chartData.length>0&&<div style={{display:"flex",flexDirection:"column",gap:12}}>
+      <Card title="Répartition par catégorie" T={T}>
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart>
+            <Pie data={chartData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={e=>e.name+" ("+pct(e.value,totalFiltre)+"%)"}>
+              {chartData.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}
+            </Pie>
+            <Tooltip formatter={v=>fmt(v)} contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+          </PieChart>
+        </ResponsiveContainer>
+      </Card>
+      <Card title="Montants par catégorie" T={T}>
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={chartData} layout="vertical">
+            <XAxis type="number" tickFormatter={fmtS} tick={{fill:T.muted,fontSize:9}}/>
+            <YAxis type="category" dataKey="name" tick={{fill:T.muted,fontSize:10}} width={90}/>
+            <Tooltip formatter={v=>fmt(v)} contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+            <Bar dataKey="value" radius={[0,6,6,0]}>
+              {chartData.map((_,i)=><Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </Card>
+    </div>}
+
+    {/* MODAL SAISIE */}
+    {showDep&&<Modal title="Saisie dépenses" onClose={()=>setShowDep(false)} onSave={saveDeps} saveLabel={"Enregistrer "+lines.filter(l=>l.libelle&&(l.montant||l.prix_unitaire)).length+" ligne(s)"} T={T} wide>
+      {saving?<Spin/>:<>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}>
+          <thead><tr style={{background:T.mid}}>{["Libellé *","Catégorie","Qté","Prix Unit.","= Montant","Date","Note",""].map((h,i)=><th key={i} style={{padding:"7px 8px",textAlign:"left",fontSize:10,color:T.muted,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+          <tbody>{lines.map(l=>{const mont=calcMontant(l.quantite,l.prix_unitaire);return <tr key={l.id} style={{borderBottom:"1px solid "+T.border+"44"}}>
+            <td style={{padding:"4px"}}><input value={l.libelle} onChange={e=>upLine(l.id,"libelle",e.target.value)} placeholder="ex: Béton B25" style={iS}/></td>
+            <td style={{padding:"4px"}}><select value={l.categorie} onChange={e=>upLine(l.id,"categorie",e.target.value)} style={iS}>{CATS.map(cat=><option key={cat} value={cat}>{cat}</option>)}</select></td>
+            <td style={{padding:"4px"}}><input type="number" value={l.quantite} onChange={e=>upLine(l.id,"quantite",e.target.value)} style={{...iS,width:70}} min="0" placeholder="1"/></td>
+            <td style={{padding:"4px"}}><input type="number" value={l.prix_unitaire} onChange={e=>upLine(l.id,"prix_unitaire",e.target.value)} style={{...iS,width:110}} placeholder="0"/></td>
+            <td style={{padding:"6px 8px",fontWeight:700,color:mont>0?T.success:T.muted,whiteSpace:"nowrap",fontSize:12,minWidth:100}}>{mont>0?fmtN(mont)+" XOF":"—"}</td>
+            <td style={{padding:"4px"}}><input type="date" value={l.date} onChange={e=>upLine(l.id,"date",e.target.value)} style={{...iS,width:130}}/></td>
+            <td style={{padding:"4px"}}><input value={l.note} onChange={e=>upLine(l.id,"note",e.target.value)} style={iS}/></td>
+            <td style={{padding:"4px"}}><button onClick={()=>setLines(p=>p.length>1?p.filter(x=>x.id!==l.id):p)} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:5,padding:"5px 8px",cursor:"pointer"}}>✕</button></td>
+          </tr>;})}
+          </tbody>
+        </table></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+          <button onClick={()=>setLines(p=>[...p,newDepLine()])} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Ligne</button>
+          {totalS>0&&<div style={{fontWeight:700,color:T.primary,fontSize:13}}>Total : {fmt(totalS)}</div>}
+        </div>
+      </>}
+    </Modal>}
+  </div>;
+}
+
 // ── FICHE ─────────────────────────────────────────────────────────────────────
 function Fiche({chantier:c,setPage,reload,T,isMobile}){
   const [tab,setTab]=useState("infos");const [showDep,setShowDep]=useState(false);const [lines,setLines]=useState([newDepLine()]);const [saving,setSaving]=useState(false);
@@ -402,44 +601,7 @@ function Fiche({chantier:c,setPage,reload,T,isMobile}){
       <Card title="Informations" T={T}>{[["Nom",c.nom],["Client",c.client||"-"],["Localisation",c.localisation||"-"],["Type",c.type||"-"],["Début",c.date_debut||"-"],["Fin prévue",c.date_fin||"-"],["Description",c.description||"-"]].map(row=><div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid "+T.border,fontSize:12}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:600}}>{row[1]}</span></div>)}</Card>
       <Card title="Budget" T={T}><div style={{marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:4}}><span style={{color:T.muted}}>Avancement</span><strong style={{color:dp>100?T.danger:dp>80?T.warning:T.success}}>{dp}%</strong></div><PBar p={dp} color={dp>100?T.danger:dp>80?T.warning:T.success} h={12}/></div>{[["Budget initial",fmt(c.budgetInitial),T.white],["Dépenses",fmt(dep),T.warning],["Marge",fmt(c.budgetInitial-dep),c.budgetInitial-dep>=0?T.success:T.danger]].map(row=><div key={row[0]} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"1px solid "+T.border,fontSize:12}}><span style={{color:T.muted}}>{row[0]}</span><span style={{fontWeight:700,color:row[2]}}>{row[1]}</span></div>)}</Card>
     </div>}
-    {tab==="depenses"&&<div style={{display:"flex",flexDirection:"column",gap:10}}>
-      <div style={{display:"flex",justifyContent:"flex-end",gap:6}}><button onClick={exportFiche} style={expBtn(T.success)}>📥 CSV dépenses</button><button onClick={()=>{setLines([newDepLine()]);setShowDep(true);}} style={{background:T.primary,color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Saisie multi-lignes</button></div>
-      {c.depenses.length===0&&<Empty msg="Aucune dépense" icon="🧾"/>}
-      {c.depenses.map(d=><div key={d.id} style={{background:T.card,border:"1px solid "+T.border,borderRadius:9,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:13}}>{d.libelle}</div>
-          <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap",alignItems:"center"}}>
-            <Badge label={d.categorie} color={catC(d.categorie,T)} small/>
-            {d.quantite>0&&d.prix_unitaire>0&&<span style={{fontSize:10,color:T.muted}}>{fmtN(d.quantite)} × {fmtN(d.prix_unitaire)} XOF</span>}
-            <span style={{fontSize:10,color:T.muted}}>{d.date}</span>
-            {d.note&&<span style={{fontSize:10,color:T.muted}}>— {d.note}</span>}
-          </div>
-        </div>
-        <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontWeight:800,color:T.primary,fontSize:13}}>{fmt(d.montant)}</div>
-            {d.quantite>1&&<div style={{fontSize:9,color:T.muted}}>{fmtN(d.quantite)} unités</div>}
-          </div>
-          <button onClick={()=>delDep(d.id)} style={{background:T.danger+"22",border:"none",color:T.danger,borderRadius:5,padding:"3px 7px",fontSize:10,cursor:"pointer"}}>✕</button>
-        </div>
-      </div>)}
-      {showDep&&<Modal title="Saisie dépenses multi-lignes" onClose={()=>setShowDep(false)} onSave={saveDeps} saveLabel={"Enregistrer "+lines.filter(l=>l.libelle&&l.montant).length+" ligne(s)"} T={T} wide>
-        {saving?<Spin/>:<>
-          <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:700}}><thead><tr style={{background:T.mid}}>{["Libellé *","Catégorie","Qté","Prix Unit. *","= Montant","Date","Note",""].map((h,i)=><th key={i} style={{padding:"7px 8px",textAlign:"left",fontSize:10,color:T.muted,fontWeight:600,whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{lines.map(l=>{const iS={background:T.bg,border:"1px solid "+T.border,borderRadius:5,padding:"6px 8px",color:T.white,fontSize:12,outline:"none",width:"100%"};const mont=calcMontant(l.quantite,l.prix_unitaire);return <tr key={l.id} style={{borderBottom:"1px solid "+T.border+"44"}}>
-            <td style={{padding:"4px"}}><input value={l.libelle} onChange={e=>upLine(l.id,"libelle",e.target.value)} placeholder="ex: Béton B25" style={iS}/></td>
-            <td style={{padding:"4px"}}><select value={l.categorie} onChange={e=>upLine(l.id,"categorie",e.target.value)} style={iS}>{CATS.map(c=><option key={c} value={c}>{c}</option>)}</select></td>
-            <td style={{padding:"4px"}}><input type="number" value={l.quantite} onChange={e=>upLine(l.id,"quantite",e.target.value)} style={{...iS,width:70}} min="0" placeholder="1"/></td>
-            <td style={{padding:"4px"}}><input type="number" value={l.prix_unitaire} onChange={e=>upLine(l.id,"prix_unitaire",e.target.value)} style={{...iS,width:110}} placeholder="0"/></td>
-            <td style={{padding:"4px 8px",fontWeight:700,color:mont>0?T.success:T.muted,whiteSpace:"nowrap",fontSize:12}}>{mont>0?fmtN(mont)+" XOF":"—"}</td>
-            <td style={{padding:"4px"}}><input type="date" value={l.date} onChange={e=>upLine(l.id,"date",e.target.value)} style={{...iS,width:130}}/></td>
-            <td style={{padding:"4px"}}><input value={l.note} onChange={e=>upLine(l.id,"note",e.target.value)} style={iS}/></td>
-            <td style={{padding:"4px"}}><button onClick={()=>setLines(p=>p.length>1?p.filter(x=>x.id!==l.id):p)} style={{background:T.danger+"22",color:T.danger,border:"none",borderRadius:5,padding:"5px 8px",cursor:"pointer"}}>✕</button></td>
-          </tr>;})}
-          </tbody></table></div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}><button onClick={()=>setLines(p=>[...p,newDepLine()])} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:7,padding:"7px 14px",fontWeight:700,cursor:"pointer",fontSize:12}}>+ Ligne</button>{totalS>0&&<div style={{fontWeight:700,color:T.primary,fontSize:13}}>Total : {fmt(totalS)}</div>}</div>
-        </>}
-      </Modal>}
-    </div>}
+    {tab==="depenses"&&<DepensesTab c={c} T={T} lines={lines} setLines={setLines} showDep={showDep} setShowDep={setShowDep} saving={saving} saveDeps={saveDeps} upLine={upLine} totalS={totalS} exportFiche={exportFiche} delDep={delDep}/>}
   </div>;
 }
 
