@@ -1024,27 +1024,181 @@ function SynthesePage({ch,intv,T,isMobile,printSynthese}){
 
 // ── KPI PAGE ──────────────────────────────────────────────────────────────────
 function KpiPage({ch,intv,T,isMobile}){
-  const totalB=ch.reduce((a,c)=>a+c.budgetInitial,0),totalD=ch.reduce((a,c)=>a+totalDep(c),0);
-  const enCours=ch.filter(c=>c.statut==="En cours").length,enDerive=ch.filter(c=>c.statut==="En derive").length;
-  const clotures=ch.filter(c=>c.statut==="Cloture");
-  const perfData=clotures.map(c=>{const d=totalDep(c);return {nom:c.nom.slice(0,15),budget:c.budgetInitial,dep:d,marge:c.budgetInitial-d};});
+  const [selection,setSelection]=useState(()=>Object.fromEntries(ch.map(c=>[c.id,true])));
+  const [showSel,setShowSel]=useState(false);
+  const [search,setSearch]=useState("");
+
+  // Sync si nouveaux chantiers chargés
+  useEffect(()=>{
+    setSelection(prev=>{
+      const next={...prev};
+      ch.forEach(c=>{if(!(c.id in next))next[c.id]=true;});
+      return next;
+    });
+  },[ch]);
+
+  const chSel=ch.filter(c=>selection[c.id]);
+  const nbSel=chSel.length;
+
+  const totalB=chSel.reduce((a,c)=>a+c.budgetInitial,0);
+  const totalD=chSel.reduce((a,c)=>a+totalDep(c),0);
+  const enCours=chSel.filter(c=>c.statut==="En cours").length;
+  const enDerive=chSel.filter(c=>c.statut==="En derive").length;
+  const clotures=chSel.filter(c=>c.statut==="Cloture");
+  const marge=totalB-totalD;
+
+  // Dépenses par catégorie sur sélection
+  const parCat=useMemo(()=>{
+    const m={};
+    chSel.forEach(c=>(c.depenses||[]).forEach(d=>{
+      const k=d.categorie||"Divers";
+      if(!m[k])m[k]={name:k,value:0};
+      m[k].value+=Number(d.montant||0);
+    }));
+    return Object.values(m).sort((a,b)=>b.value-a.value);
+  },[chSel]);
+
+  // Évolution dépenses par mois
+  const parMois=useMemo(()=>{
+    const m={};
+    chSel.forEach(c=>(c.depenses||[]).forEach(d=>{
+      const mo=getMois(d.date)||"?";
+      if(!m[mo])m[mo]={mois:mo,dep:0,budget:0};
+      m[mo].dep+=Number(d.montant||0);
+    }));
+    chSel.forEach(c=>{const mo=getMois(c.date_debut)||"?";if(!m[mo])m[mo]={mois:mo,dep:0,budget:0};m[mo].budget+=c.budgetInitial;});
+    return Object.values(m).sort((a,b)=>a.mois.localeCompare(b.mois)).slice(-10);
+  },[chSel]);
+
+  const perfData=clotures.map(c=>{const d=totalDep(c);return{nom:c.nom.slice(0,14),budget:c.budgetInitial,dep:d,marge:c.budgetInitial-d};});
   const intvParType=TYPES_INT.map(t=>({type:t,n:intv.filter(i=>i.type===t).length})).filter(d=>d.n>0);
-  const COLORS=[DT.primary,DT.secondary,DT.success,DT.warning];
+  const COLORS=[DT.primary,DT.secondary,DT.success,DT.warning,"#A855F7","#EC4899"];
+
+  const chFiltres=ch.filter(c=>!search||c.nom.toLowerCase().includes(search.toLowerCase())||(c.client||"").toLowerCase().includes(search.toLowerCase()));
+
+  function toggleAll(val){setSelection(Object.fromEntries(ch.map(c=>[c.id,val])));}
+
   return <div style={{display:"flex",flexDirection:"column",gap:14}}>
-    <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:8}}>
-      <Kpi icon="🏗️" label="Total chantiers" value={ch.length} T={T} color={T.primary} compact/>
-      <Kpi icon="▶️" label="En cours" value={enCours} T={T} color={T.secondary} compact/>
-      <Kpi icon="⚠️" label="En dérive" value={enDerive} T={T} color={enDerive>0?T.danger:T.success} compact/>
-      <Kpi icon="✅" label="Clôturés" value={clotures.length} T={T} color={T.success} compact/>
-      <Kpi icon="💰" label="Budget global" value={fmtS(totalB)} T={T} compact/>
-      <Kpi icon="💸" label="Dépenses" value={fmtS(totalD)} T={T} color={T.warning} compact/>
-      <Kpi icon="📈" label="Consommé" value={pct(totalD,totalB)+"%" } T={T} color={pct(totalD,totalB)>80?T.danger:T.success} compact/>
-      <Kpi icon="🔧" label="Interventions" value={intv.length} T={T} color={T.secondary} compact/>
+
+    {/* SÉLECTEUR CHANTIERS */}
+    <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:T.borderRadius,padding:"12px 16px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:13}}>📌 Chantiers inclus dans les KPIs</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:2}}>{nbSel} / {ch.length} chantier{ch.length>1?"s":""} sélectionné{nbSel>1?"s":""}</div>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          <button onClick={()=>toggleAll(true)} style={{background:T.success+"22",color:T.success,border:"1px solid "+T.success+"44",borderRadius:7,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700}}>✓ Tout</button>
+          <button onClick={()=>toggleAll(false)} style={{background:T.danger+"22",color:T.danger,border:"1px solid "+T.danger+"44",borderRadius:7,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700}}>✕ Aucun</button>
+          <button onClick={()=>setShowSel(p=>!p)} style={{background:T.secondary+"22",color:T.secondary,border:"1px solid "+T.secondary+"44",borderRadius:7,padding:"5px 12px",fontSize:11,cursor:"pointer",fontWeight:700}}>{showSel?"▲ Réduire":"▼ Choisir"}</button>
+        </div>
+      </div>
+
+      {showSel&&<div style={{marginTop:12}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Filtrer les chantiers..." style={{width:"100%",background:T.mid,border:"1px solid "+T.border,borderRadius:7,padding:"7px 10px",color:T.white,fontSize:12,outline:"none",marginBottom:10,boxSizing:"border-box"}}/>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(220px,1fr))",gap:6,maxHeight:280,overflowY:"auto"}}>
+          {chFiltres.map(c=>{
+            const sel=!!selection[c.id];
+            const d=totalDep(c),pp=pct(d,c.budgetInitial);
+            return <div key={c.id} onClick={()=>setSelection(p=>({...p,[c.id]:!p[c.id]}))} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",borderRadius:9,border:"2px solid "+(sel?stC(c.statut,T)+"88":T.border),background:sel?stC(c.statut,T)+"11":T.mid,cursor:"pointer",transition:"all .15s"}}>
+              <div style={{width:18,height:18,borderRadius:5,border:"2px solid "+(sel?T.success:T.border),background:sel?T.success:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:11,color:"#fff"}}>{sel?"✓":""}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.nom}</div>
+                <div style={{display:"flex",gap:5,marginTop:2,alignItems:"center"}}>
+                  <span style={{fontSize:9,color:stC(c.statut,T),fontWeight:600}}>{c.statut}</span>
+                  {c.client&&<span style={{fontSize:9,color:T.muted}}>· {c.client}</span>}
+                </div>
+                <div style={{marginTop:3}}><PBar p={pp} color={pp>100?T.danger:pp>80?T.warning:T.success} h={3}/></div>
+              </div>
+              <div style={{fontSize:11,fontWeight:700,color:sel?T.white:T.muted,flexShrink:0}}>{pp}%</div>
+            </div>;
+          })}
+        </div>
+      </div>}
     </div>
-    <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}>
-      {perfData.length>0&&<Card title="Performance chantiers clôturés" T={T}><ResponsiveContainer width="100%" height={200}><BarChart data={perfData}><XAxis dataKey="nom" tick={{fill:T.muted,fontSize:8}}/><YAxis tickFormatter={fmtS} tick={{fill:T.muted,fontSize:9}}/><Tooltip formatter={v=>fmt(v)} contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/><Bar dataKey="budget" fill={T.secondary} name="Budget" radius={[3,3,0,0]}/><Bar dataKey="dep" fill={T.primary} name="Dépenses" radius={[3,3,0,0]}/></BarChart></ResponsiveContainer></Card>}
-      {intvParType.length>0&&<Card title="Interventions par type" T={T}><ResponsiveContainer width="100%" height={200}><PieChart><Pie data={intvParType} dataKey="n" nameKey="type" cx="50%" cy="50%" outerRadius={75} label={e=>e.type+" ("+e.n+")"}>{intvParType.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie><Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/></PieChart></ResponsiveContainer></Card>}
-    </div>
-    {ch.length===0&&intv.length===0&&<Empty msg="Aucune donnée pour les KPIs" icon="📈"/>}
+
+    {nbSel===0&&<Empty msg="Aucun chantier sélectionné" icon="📊"/>}
+
+    {nbSel>0&&<>
+      {/* KPIs PRINCIPAUX */}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:8}}>
+        <Kpi icon="🏗️" label="Chantiers" value={nbSel} T={T} color={T.primary} compact/>
+        <Kpi icon="▶️" label="En cours" value={enCours} T={T} color={T.secondary} compact/>
+        <Kpi icon="⚠️" label="En dérive" value={enDerive} T={T} color={enDerive>0?T.danger:T.success} compact/>
+        <Kpi icon="✅" label="Clôturés" value={clotures.length} T={T} color={T.success} compact/>
+        <Kpi icon="💰" label="Budget total" value={fmtS(totalB)} T={T} compact/>
+        <Kpi icon="💸" label="Dépenses" value={fmtS(totalD)} T={T} color={T.warning} compact/>
+        <Kpi icon="📈" label="Consommé" value={pct(totalD,totalB)+"%"} T={T} color={pct(totalD,totalB)>80?T.danger:T.success} compact/>
+        <Kpi icon="💵" label="Marge" value={fmtS(marge)} T={T} color={marge>=0?T.success:T.danger} compact/>
+      </div>
+
+      {/* GRAPHIQUES */}
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14}}>
+        {parCat.length>0&&<Card title="📂 Dépenses par catégorie" T={T}>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={parCat} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={75} label={e=>e.name+" ("+pct(e.value,totalD)+"%)"}>{parCat.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie>
+              <Tooltip formatter={v=>fmt(v)} contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+            </PieChart>
+          </ResponsiveContainer>
+        </Card>}
+
+        {parMois.length>1&&<Card title="📅 Dépenses par mois" T={T}>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={parMois}>
+              <XAxis dataKey="mois" tick={{fill:T.muted,fontSize:9}}/>
+              <YAxis tickFormatter={fmtS} tick={{fill:T.muted,fontSize:9}}/>
+              <Tooltip formatter={v=>fmt(v)} contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+              <Bar dataKey="dep" fill={T.primary} name="Dépenses" radius={[3,3,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>}
+
+        {perfData.length>0&&<Card title="🏆 Performance chantiers clôturés" T={T}>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={perfData}>
+              <XAxis dataKey="nom" tick={{fill:T.muted,fontSize:8}}/>
+              <YAxis tickFormatter={fmtS} tick={{fill:T.muted,fontSize:9}}/>
+              <Tooltip formatter={v=>fmt(v)} contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+              <Bar dataKey="budget" fill={T.secondary} name="Budget" radius={[3,3,0,0]}/>
+              <Bar dataKey="dep" fill={T.primary} name="Dépenses" radius={[3,3,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>}
+
+        {intvParType.length>0&&<Card title="🔧 Interventions par type" T={T}>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={intvParType} dataKey="n" nameKey="type" cx="50%" cy="50%" outerRadius={75} label={e=>e.type+" ("+e.n+")"}>{intvParType.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}</Pie>
+              <Tooltip contentStyle={{background:T.card,border:"1px solid "+T.border,color:T.white}}/>
+            </PieChart>
+          </ResponsiveContainer>
+        </Card>}
+      </div>
+
+      {/* TABLEAU RÉCAP */}
+      <Card title="📋 Récapitulatif des chantiers sélectionnés" T={T}>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:500}}>
+          <thead><tr style={{background:T.mid}}>{["Chantier","Client","Statut","Budget","Dépenses","%","Marge"].map((h,i)=><th key={i} style={{padding:"8px 10px",textAlign:i>2?"right":"left",fontSize:10,color:T.muted,fontWeight:600}}>{h}</th>)}</tr></thead>
+          <tbody>{chSel.map(c=>{const d=totalDep(c),pp=pct(d,c.budgetInitial),mg=c.budgetInitial-d;return <tr key={c.id} style={{borderBottom:"1px solid "+T.border+"33"}}>
+            <td style={{padding:"8px 10px",fontWeight:700}}>{c.nom}</td>
+            <td style={{padding:"8px 10px",color:T.muted}}>{c.client||"—"}</td>
+            <td style={{padding:"8px 10px"}}><Badge label={c.statut} color={stC(c.statut,T)} small/></td>
+            <td style={{padding:"8px 10px",textAlign:"right"}}>{fmtN(c.budgetInitial)}</td>
+            <td style={{padding:"8px 10px",textAlign:"right",color:T.warning}}>{fmtN(d)}</td>
+            <td style={{padding:"8px 10px",textAlign:"right"}}><span style={{color:pp>100?T.danger:pp>80?T.warning:T.success,fontWeight:700}}>{pp}%</span></td>
+            <td style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:mg>=0?T.success:T.danger}}>{fmtN(mg)}</td>
+          </tr>;})}
+          <tr style={{background:T.primary+"22",borderTop:"2px solid "+T.primary}}>
+            <td colSpan={3} style={{padding:"8px 10px",fontWeight:800,color:T.primary}}>TOTAL</td>
+            <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800}}>{fmtN(totalB)}</td>
+            <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:T.warning}}>{fmtN(totalD)}</td>
+            <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:pct(totalD,totalB)>80?T.danger:T.success}}>{pct(totalD,totalB)}%</td>
+            <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:marge>=0?T.success:T.danger}}>{fmtN(marge)}</td>
+          </tr>
+          </tbody>
+        </table></div>
+      </Card>
+    </>}
   </div>;
 }
